@@ -8,7 +8,7 @@ export default defineConfig(({ mode }) => {
     
     return {
         // MUDE [NOVO-NOME-DO-REPOSITÓRIO] PELO NOME REAL!
-        base: '/[NOVO-NOME-DO-REPOSITÓRIO]/', 
+        base: '/Vinicius-Alves-de-Amurim/', 
         
         server: {
             port: 3000,
