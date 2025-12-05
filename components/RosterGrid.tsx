@@ -1,6 +1,6 @@
 
 import React, { useMemo, useState, useEffect, useRef } from 'react';
-import { Employee, Shift, MonthlySchedule, AIRulesConfig, StaffingConfig } from '../types';
+import { Employee, Shift, MonthlySchedule, AIRulesConfig, StaffingConfig, GridSelection } from '../types';
 import { getDaysInMonth, validateSchedule } from '../services/schedulerService';
 import { Tooltip } from './Tooltip';
 import { HOLIDAYS } from '../constants';
@@ -14,6 +14,8 @@ interface Props {
   staffingConfig: StaffingConfig; 
   onReorderEmployees?: (draggedId: string, targetId: string) => void;
   isReadOnly?: boolean;
+  onUndo?: () => void;
+  onRedo?: () => void;
 }
 
 interface ContextMenuState {
@@ -35,20 +37,25 @@ interface DailyStat {
   roleIdeals: Record<string, number>;
 }
 
-export const RosterGrid: React.FC<Props> = ({ employees, shifts, currentSchedule, setSchedule, rules, staffingConfig, onReorderEmployees, isReadOnly = false }) => {
+export const RosterGrid: React.FC<Props> = ({ 
+    employees, shifts, currentSchedule, setSchedule, rules, staffingConfig, 
+    onReorderEmployees, isReadOnly = false, onUndo, onRedo 
+}) => {
   const [contextMenu, setContextMenu] = useState<ContextMenuState>({ visible: false, type: 'cell', x: 0, y: 0 });
   const menuRef = useRef<HTMLDivElement>(null);
   
-  // Refs for scroll sync
-  const headerScrollRef = useRef<HTMLDivElement>(null);
-  const bodyScrollRef = useRef<HTMLDivElement>(null);
-  // Flags to prevent infinite scroll loops
-  const isSyncingHeader = useRef(false);
-  const isSyncingBody = useRef(false);
+  // Single Container Ref
+  const gridContainerRef = useRef<HTMLDivElement>(null);
+
+  // Clipboard Ref
+  const internalClipboard = useRef<string | null>(null);
 
   const [draggedEmployeeId, setDraggedEmployeeId] = useState<string | null>(null);
   const [sortConfig, setSortConfig] = useState<{ key: ColumnKey | null, direction: 'asc' | 'desc' }>({ key: null, direction: 'asc' });
   const [hiddenColumns, setHiddenColumns] = useState<ColumnKey[]>([]);
+  
+  // Frozen columns state (Array of keys)
+  const [frozenColumns, setFrozenColumns] = useState<ColumnKey[]>([]);
 
   const [colWidths, setColWidths] = useState<Record<ColumnKey, number>>({
       name: 220, id: 80, role: 120, cpf: 100, scale: 80, position: 80, council: 100, bh: 60
@@ -56,6 +63,10 @@ export const RosterGrid: React.FC<Props> = ({ employees, shifts, currentSchedule
   const [resizingCol, setResizingCol] = useState<string | null>(null);
   const startResizeX = useRef(0);
   const startResizeWidth = useRef(0);
+
+  // Selection State
+  const [selection, setSelection] = useState<GridSelection | null>(null);
+  const [isSelecting, setIsSelecting] = useState(false);
 
   const daysInMonth = useMemo(() => 
     getDaysInMonth(currentSchedule.month, currentSchedule.year), 
@@ -65,24 +76,7 @@ export const RosterGrid: React.FC<Props> = ({ employees, shifts, currentSchedule
   const daysArray = Array.from({ length: daysInMonth }, (_, i) => i + 1);
   const weekDays = ['DOM', 'SEG', 'TER', 'QUA', 'QUI', 'SEX', 'SAB'];
 
-  // Scroll Sync Logic
-  const handleBodyScroll = (e: React.UIEvent<HTMLDivElement>) => {
-      if (!isSyncingHeader.current && headerScrollRef.current) {
-          isSyncingBody.current = true;
-          headerScrollRef.current.scrollLeft = e.currentTarget.scrollLeft;
-      }
-      isSyncingHeader.current = false;
-  };
-
-  const handleHeaderScroll = (e: React.UIEvent<HTMLDivElement>) => {
-      if (!isSyncingBody.current && bodyScrollRef.current) {
-          isSyncingHeader.current = true;
-          bodyScrollRef.current.scrollLeft = e.currentTarget.scrollLeft;
-      }
-      isSyncingBody.current = false;
-  };
-
-  // Sorting logic...
+  // Sorting logic
   const sortedEmployees = useMemo(() => {
     if (!sortConfig.key) return employees;
     return [...employees].sort((a, b) => {
@@ -107,7 +101,136 @@ export const RosterGrid: React.FC<Props> = ({ employees, shifts, currentSchedule
   const visibleColumns = (Object.keys(colWidths) as ColumnKey[]).filter(k => !hiddenColumns.includes(k));
   const totalLeftWidth = visibleColumns.reduce((acc, key) => acc + colWidths[key], 0);
 
-  // Stats calculation...
+  // Calculate offsets for frozen columns
+  const getColumnLeftOffset = (key: ColumnKey) => {
+      let offset = 0;
+      for (const k of visibleColumns) {
+          if (k === key) break;
+          offset += colWidths[k];
+      }
+      return offset;
+  };
+
+  // Selection Handlers
+  const handleMouseDown = (rowIndex: number, day: number) => {
+    if (isReadOnly) return;
+    setIsSelecting(true);
+    setSelection({ startRow: rowIndex, startCol: day, endRow: rowIndex, endCol: day });
+  };
+
+  const handleMouseEnter = (rowIndex: number, day: number) => {
+    if (isSelecting && selection) {
+        setSelection({ ...selection, endRow: rowIndex, endCol: day });
+    }
+  };
+
+  const handleMouseUp = () => {
+    setIsSelecting(false);
+  };
+
+  // Keyboard Logic (Undo, Redo, Copy, Paste, Delete)
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+        if (isReadOnly) return;
+
+        // UNDO (Ctrl+Z)
+        if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'z' && !e.shiftKey) {
+            e.preventDefault();
+            if (onUndo) onUndo();
+            return;
+        }
+
+        // REDO (Ctrl+Y or Ctrl+Shift+Z)
+        if (((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'y') || ((e.ctrlKey || e.metaKey) && e.shiftKey && e.key.toLowerCase() === 'z')) {
+            e.preventDefault();
+            if (onRedo) onRedo();
+            return;
+        }
+
+        if (!selection) return;
+
+        // DELETE / BACKSPACE (Clear Selection)
+        if (e.key === 'Delete' || e.key === 'Backspace') {
+            e.preventDefault();
+            const minR = Math.min(selection.startRow, selection.endRow);
+            const maxR = Math.max(selection.startRow, selection.endRow);
+            const minC = Math.min(selection.startCol, selection.endCol);
+            const maxC = Math.max(selection.startCol, selection.endCol);
+
+            const newAssignments = { ...currentSchedule.assignments };
+            let changed = false;
+
+            for (let r = minR; r <= maxR; r++) {
+                const emp = sortedEmployees[r];
+                if (!emp) continue;
+                
+                if (newAssignments[emp.id]) {
+                    const empSchedule = { ...newAssignments[emp.id] };
+                    for (let c = minC; c <= maxC; c++) {
+                        const dateKey = `${currentSchedule.year}-${String(currentSchedule.month + 1).padStart(2, '0')}-${String(c).padStart(2, '0')}`;
+                        if (empSchedule[dateKey]) {
+                            delete empSchedule[dateKey];
+                            changed = true;
+                        }
+                    }
+                    newAssignments[emp.id] = empSchedule;
+                }
+            }
+            if (changed) setSchedule(prev => ({ ...prev, assignments: newAssignments }));
+        }
+
+        // COPY (Ctrl+C)
+        if ((e.ctrlKey || e.metaKey) && e.key === 'c') {
+            const startR = Math.min(selection.startRow, selection.endRow);
+            const startC = Math.min(selection.startCol, selection.endCol);
+            const emp = sortedEmployees[startR];
+            if (!emp) return;
+            const dateKey = `${currentSchedule.year}-${String(currentSchedule.month + 1).padStart(2, '0')}-${String(startC).padStart(2, '0')}`;
+            const shiftId = currentSchedule.assignments[emp.id]?.[dateKey];
+            if (shiftId) internalClipboard.current = shiftId;
+        }
+
+        // PASTE (Ctrl+V)
+        if ((e.ctrlKey || e.metaKey) && e.key === 'v') {
+             let shiftId = internalClipboard.current;
+             if (shiftId) {
+                const minR = Math.min(selection.startRow, selection.endRow);
+                const maxR = Math.max(selection.startRow, selection.endRow);
+                const minC = Math.min(selection.startCol, selection.endCol);
+                const maxC = Math.max(selection.startCol, selection.endCol);
+
+                const newAssignments = { ...currentSchedule.assignments };
+                for (let r = minR; r <= maxR; r++) {
+                    const emp = sortedEmployees[r];
+                    if (!emp) continue;
+                    if (!newAssignments[emp.id]) newAssignments[emp.id] = {};
+                    const empSchedule = { ...newAssignments[emp.id] };
+
+                    for (let c = minC; c <= maxC; c++) {
+                        const dateKey = `${currentSchedule.year}-${String(currentSchedule.month + 1).padStart(2, '0')}-${String(c).padStart(2, '0')}`;
+                        empSchedule[dateKey] = shiftId;
+                    }
+                    newAssignments[emp.id] = empSchedule;
+                }
+                setSchedule(prev => ({ ...prev, assignments: newAssignments }));
+             }
+        }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [selection, currentSchedule, sortedEmployees, isReadOnly, setSchedule, onUndo, onRedo]);
+
+  const isSelected = (rowIndex: number, day: number) => {
+    if (!selection) return false;
+    const minR = Math.min(selection.startRow, selection.endRow);
+    const maxR = Math.max(selection.startRow, selection.endRow);
+    const minC = Math.min(selection.startCol, selection.endCol);
+    const maxC = Math.max(selection.startCol, selection.endCol);
+    return rowIndex >= minR && rowIndex <= maxR && day >= minC && day <= maxC;
+  };
+
+  // Stats calculation
   const dailyStats = useMemo<DailyStat[]>(() => {
       return daysArray.map(day => {
           const date = new Date(currentSchedule.year, currentSchedule.month, day);
@@ -121,7 +244,11 @@ export const RosterGrid: React.FC<Props> = ({ employees, shifts, currentSchedule
           employees.forEach(emp => {
               const shiftId = currentSchedule.assignments[emp.id]?.[dateKey];
               const shift = shifts.find(s => s.id === shiftId);
-              if (shift && shift.category === 'work') {
+              
+              // Count as work if it's explicitly Work OR it is undefined (Empty)
+              const isWork = !shift || (shift.category !== 'dayoff' && shift.category !== 'absence' && shift.category !== 'leave');
+
+              if (isWork) {
                   totalActive++;
                   roleCounts[emp.role] = (roleCounts[emp.role] || 0) + 1;
               }
@@ -158,7 +285,7 @@ export const RosterGrid: React.FC<Props> = ({ employees, shifts, currentSchedule
       return HOLIDAYS[`${dayStr}-${monthStr}`];
   }
 
-  // ... (Header click, Context Menu handlers remain similar)
+  // Header click handlers...
    const handleHeaderClick = (key: ColumnKey) => {
       setSortConfig(prev => ({
           key,
@@ -229,6 +356,9 @@ export const RosterGrid: React.FC<Props> = ({ employees, shifts, currentSchedule
 
   const handleCellClick = (employeeId: string, day: number) => {
        if (isReadOnly) return;
+       // Only trigger click change if NOT dragging selection
+       if (selection && (selection.startRow !== selection.endRow || selection.startCol !== selection.endCol)) return;
+
        const dateKey = `${currentSchedule.year}-${String(currentSchedule.month + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
         const currentAssignment = currentSchedule.assignments[employeeId]?.[dateKey];
         let nextShiftIndex = -1;
@@ -264,26 +394,44 @@ export const RosterGrid: React.FC<Props> = ({ employees, shifts, currentSchedule
       setDraggedEmployeeId(null);
   };
 
+  const toggleFreeze = (key: ColumnKey) => {
+      if (frozenColumns.includes(key)) {
+          setFrozenColumns(prev => prev.filter(k => k !== key));
+      } else {
+          setFrozenColumns(prev => [...prev, key]);
+      }
+      setContextMenu(prev => ({...prev, visible:false}));
+  }
+
   const labelMap: Record<ColumnKey, string> = { 
       name: 'NOME COLABORADOR', id: 'ID', role: 'CARGO', cpf: 'CPF', 
       scale: 'ESCALA', position: 'Nº POSIÇÃO', council: 'REG. CONSELHO', bh: 'BH' 
   };
 
   return (
-    <div className="bg-white rounded shadow-sm border border-slate-300 flex flex-col h-full overflow-hidden select-none relative print:border-none print:shadow-none">
+    <div 
+        ref={gridContainerRef}
+        className="bg-white rounded shadow-sm border border-slate-300 flex flex-col h-full w-full overflow-auto select-none relative print:border-none print:shadow-none" 
+        onMouseUp={handleMouseUp}
+    >
       
       {/* Restore Cols */}
       {hiddenColumns.length > 0 && (
-          <button onClick={() => setHiddenColumns([])} className="absolute top-1 left-1 z-30 bg-blue-100 text-blue-700 p-1 rounded hover:bg-blue-200 shadow print:hidden">
+          <button onClick={() => setHiddenColumns([])} className="absolute top-1 left-1 z-50 bg-blue-100 text-blue-700 p-1 rounded hover:bg-blue-200 shadow print:hidden text-xs">
              Restaurar Colunas
           </button>
       )}
 
       {/* Context Menu */}
       {contextMenu.visible && (
-          <div ref={menuRef} className="fixed z-50 bg-white shadow-xl rounded-lg border border-slate-200 py-1 min-w-[160px]" style={{ top: contextMenu.y, left: contextMenu.x }}>
+          <div ref={menuRef} className="fixed z-[100] bg-white shadow-xl rounded-lg border border-slate-200 py-1 min-w-[160px]" style={{ top: contextMenu.y, left: contextMenu.x }}>
               {contextMenu.type === 'header' ? (
-                  <button onClick={() => { if(contextMenu.columnKey) setHiddenColumns(prev => [...prev, contextMenu.columnKey as ColumnKey]); setContextMenu(prev => ({...prev, visible:false}))}} className="w-full text-left px-4 py-2 hover:bg-slate-50 text-xs font-bold text-slate-700">Ocultar Coluna</button>
+                  <>
+                    <button onClick={() => toggleFreeze(contextMenu.columnKey as ColumnKey)} className="w-full text-left px-4 py-2 hover:bg-slate-50 text-xs font-bold text-slate-700">
+                        {frozenColumns.includes(contextMenu.columnKey as ColumnKey) ? 'Descongelar Coluna' : 'Congelar Coluna'}
+                    </button>
+                    <button onClick={() => { if(contextMenu.columnKey) setHiddenColumns(prev => [...prev, contextMenu.columnKey as ColumnKey]); setContextMenu(prev => ({...prev, visible:false}))}} className="w-full text-left px-4 py-2 hover:bg-slate-50 text-xs text-red-600 font-bold border-t">Ocultar Coluna</button>
+                  </>
               ) : (
                   <>
                     <button onClick={handleClearCell} className="w-full text-left px-4 py-2 hover:bg-red-50 text-xs text-red-600 font-bold border-b">Limpar</button>
@@ -300,20 +448,34 @@ export const RosterGrid: React.FC<Props> = ({ employees, shifts, currentSchedule
           </div>
       )}
 
-      {/* Header Container - Syncs Scroll */}
-      <div className="flex bg-company-blue text-white z-20 shadow-md">
-        <div className="flex-shrink-0 flex border-r border-blue-800 bg-company-blue z-20" style={{ width: totalLeftWidth }}>
-            {visibleColumns.map((key) => (
-                <div key={key} style={{ width: colWidths[key] }} onClick={() => handleHeaderClick(key)} onContextMenu={(e) => handleHeaderContextMenu(e, key)} className="relative p-2 font-bold text-[10px] border-r border-blue-800 flex items-center justify-center overflow-hidden whitespace-nowrap cursor-pointer hover:bg-blue-900 group">
+      {/* HEADER: Sticky Top */}
+      <div className="flex bg-company-blue text-white z-40 shadow-md w-fit sticky top-0">
+        {/* Left Columns Header */}
+        <div className="flex-shrink-0 flex border-r border-blue-800 bg-company-blue z-40 sticky left-0">
+            {visibleColumns.map((key) => {
+                const isFrozen = frozenColumns.includes(key);
+                const left = getColumnLeftOffset(key);
+                return (
+                <div key={key} 
+                     style={{ 
+                         width: colWidths[key],
+                         position: isFrozen ? 'sticky' : 'relative',
+                         left: isFrozen ? left : 'auto',
+                         zIndex: isFrozen ? 50 : 'auto'
+                     }} 
+                     onClick={() => handleHeaderClick(key)} 
+                     onContextMenu={(e) => handleHeaderContextMenu(e, key)} 
+                     className={`relative p-2 font-bold text-[10px] border-r border-blue-800 flex items-center justify-center overflow-hidden whitespace-nowrap cursor-pointer hover:bg-blue-900 group ${isFrozen ? 'bg-company-blue shadow-[2px_0_5px_rgba(0,0,0,0.2)]' : ''}`}>
                     {labelMap[key]}
                     {sortConfig.key === key && <span className="ml-1 text-[8px]">{sortConfig.direction === 'asc' ? '▲' : '▼'}</span>}
+                    {isFrozen && <span className="absolute top-0.5 right-0.5 text-[8px] opacity-50">❄</span>}
                     <div onMouseDown={(e) => startResizing(e, key)} onClick={(e) => e.stopPropagation()} className="absolute right-0 top-0 bottom-0 w-1 cursor-col-resize hover:bg-blue-400 z-10" />
                 </div>
-            ))}
+            )})}
         </div>
-        {/* Scrollable Date Header */}
-        <div ref={headerScrollRef} onScroll={handleHeaderScroll} className="flex-1 overflow-x-auto flex no-scrollbar">
-            <div className="flex min-w-max">
+        
+        {/* Days Header */}
+        <div className="flex min-w-max">
             {daysArray.map(day => {
                 const isOff = isWeekendOrHoliday(day);
                 return (
@@ -322,62 +484,83 @@ export const RosterGrid: React.FC<Props> = ({ employees, shifts, currentSchedule
                     <span className="text-[10px] font-bold">{String(day).padStart(2, '0')}</span>
                 </div>
             )})}
-            </div>
+            {/* Extra Columns Header */}
+             <div className="w-16 flex-shrink-0 p-2 font-bold text-[10px] border-r border-blue-800 flex items-center justify-center bg-company-blue">FOLGAS</div>
+             <div className="w-10 flex-shrink-0 p-2 font-bold text-[10px] border-r border-blue-800 flex items-center justify-center bg-company-blue" title="Status CLT">ST</div>
         </div>
-        <div className="w-16 flex-shrink-0 p-2 font-bold text-[10px] border-l border-blue-800 flex items-center justify-center bg-company-blue">FOLGAS</div>
-        <div className="w-8 flex-shrink-0 p-2 font-bold text-[10px] border-l border-blue-800 flex items-center justify-center bg-company-blue" title="Status CLT">ST</div>
       </div>
 
-      {/* Body Container - Main Scroll */}
-      {/* CRITICAL FIX: Removed overflow-x-hidden to allow horizontal scrolling, enabled sync */}
-      <div ref={bodyScrollRef} onScroll={handleBodyScroll} className="flex-1 overflow-y-auto overflow-x-auto relative bg-slate-200 print:bg-white print:overflow-visible" >
-        <div className="min-w-max">
-            {sortedEmployees.map(employee => {
-            const validation = validateSchedule(employee.id, currentSchedule, shifts, rules);
-            const stats = calculateStats(employee.id);
+      {/* BODY */}
+      <div className="flex flex-col min-w-max">
+        {sortedEmployees.map((employee, rowIndex) => {
+        const validation = validateSchedule(employee.id, currentSchedule, shifts, rules);
+        const stats = calculateStats(employee.id);
 
-            return (
+        return (
+            <div 
+                key={employee.id} 
+                className={`flex border-b border-slate-300 bg-white hover:bg-blue-50 transition-colors group h-9 ${draggedEmployeeId === employee.id ? 'opacity-50' : ''}`}
+            >
+                {/* Left Columns (Data) */}
                 <div 
-                    key={employee.id} draggable={!isReadOnly} onDragStart={(e) => handleDragStart(e, employee.id)} onDragOver={(e) => e.preventDefault()} onDrop={(e) => handleDrop(e, employee.id)}
-                    className={`flex border-b border-slate-300 bg-white hover:bg-blue-50 transition-colors group h-9 ${draggedEmployeeId === employee.id ? 'opacity-50' : ''}`}
+                    draggable={!isReadOnly} 
+                    onDragStart={(e) => handleDragStart(e, employee.id)} 
+                    onDragOver={(e) => e.preventDefault()} 
+                    onDrop={(e) => handleDrop(e, employee.id)}
+                    className="flex-shrink-0 flex border-r border-slate-300 bg-white z-10 group-hover:bg-blue-50 cursor-move sticky left-0"
                 >
-                    {/* Fixed Left Columns - Sticky to follow horizontal scroll */}
-                    <div className="flex-shrink-0 flex border-r border-slate-300 bg-white sticky left-0 z-10 group-hover:bg-blue-50" style={{ width: totalLeftWidth }}>
-                        {visibleColumns.map(key => {
-                            const val = key === 'scale' ? employee.shiftPattern : key === 'position' ? employee.positionNumber : key === 'council' ? employee.categoryCode : key === 'bh' ? employee.bankHoursBalance : (employee as any)[key];
-                            const colorClass = key === 'bh' ? (val.startsWith('-') ? 'text-red-600' : 'text-green-600 font-bold') : 'text-slate-500';
-                            const align = key === 'name' ? 'justify-start px-2' : 'justify-center px-1';
-                            return (
-                                <div key={key} style={{ width: colWidths[key] }} className={`flex items-center ${align} border-r border-slate-100 overflow-hidden`}>
-                                    <span className={`text-[9px] truncate uppercase font-medium ${colorClass}`} title={val}>{val}</span>
-                                </div>
-                            )
-                        })}
-                    </div>
-                    
-                    {/* Grid Cells */}
-                    <div className="flex">
-                        {daysArray.map(day => {
-                            const dateKey = `${currentSchedule.year}-${String(currentSchedule.month + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
-                            const shiftId = currentSchedule.assignments[employee.id]?.[dateKey];
-                            const shift = shifts.find(s => s.id === shiftId);
-                            const isOff = isWeekendOrHoliday(day);
-                            return (
-                                <div key={day} onClick={() => handleCellClick(employee.id, day)} onContextMenu={(e) => handleCellContextMenu(e, employee.id, day)}
-                                    className={`w-8 h-full border-r border-slate-300 flex items-center justify-center cursor-pointer text-[10px] font-bold select-none
-                                        ${!shift && isOff ? 'bg-sky-50' : ''} ${shift ? shift.color : 'bg-transparent'} ${shift?.textColor ? shift.textColor : 'text-slate-700'}
-                                        hover:brightness-95 hover:z-10 hover:shadow-inner
-                                        ${isReadOnly ? 'cursor-default' : 'cursor-pointer'}
-                                    `}>
-                                    {shift ? shift.code : ''}
-                                </div>
-                            );
-                        })}
-                    </div>
+                    {visibleColumns.map(key => {
+                        const val = key === 'scale' ? employee.shiftPattern : key === 'position' ? employee.positionNumber : key === 'council' ? employee.categoryCode : key === 'bh' ? employee.bankHoursBalance : (employee as any)[key];
+                        const colorClass = key === 'bh' ? (val.startsWith('-') ? 'text-red-600' : 'text-green-600 font-bold') : 'text-slate-500';
+                        const align = key === 'name' ? 'justify-start px-2' : 'justify-center px-1';
+                        const isFrozen = frozenColumns.includes(key);
+                        const left = getColumnLeftOffset(key);
+                        
+                        return (
+                            <div key={key} style={{ 
+                                    width: colWidths[key],
+                                    position: isFrozen ? 'sticky' : 'relative',
+                                    left: isFrozen ? left : 'auto',
+                                    zIndex: isFrozen ? 30 : 'auto'
+                                }} 
+                                className={`flex items-center ${align} border-r border-slate-100 overflow-hidden bg-white group-hover:bg-blue-50 ${isFrozen ? 'shadow-[2px_0_5px_rgba(0,0,0,0.05)]' : ''}`}>
+                                <span className={`text-[9px] truncate uppercase font-medium ${colorClass}`} title={val}>{val}</span>
+                            </div>
+                        )
+                    })}
+                </div>
+                
+                {/* Grid Cells (Days) */}
+                <div className="flex">
+                    {daysArray.map(day => {
+                        const dateKey = `${currentSchedule.year}-${String(currentSchedule.month + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+                        const shiftId = currentSchedule.assignments[employee.id]?.[dateKey];
+                        const shift = shifts.find(s => s.id === shiftId);
+                        const isOff = isWeekendOrHoliday(day);
+                        const selected = isSelected(rowIndex, day);
 
-                    {/* Right Fixed Columns (Not Sticky, just at end of row) */}
-                    <div className="w-16 flex-shrink-0 border-l border-slate-300 flex items-center justify-center text-[10px] bg-slate-50 font-bold text-slate-700">{stats.daysOff}</div>
-                    <div className="w-8 flex-shrink-0 border-l border-slate-300 flex items-center justify-center bg-slate-50">
+                        return (
+                            <div key={day} 
+                                onMouseDown={() => handleMouseDown(rowIndex, day)}
+                                onMouseEnter={() => handleMouseEnter(rowIndex, day)}
+                                onClick={() => handleCellClick(employee.id, day)} 
+                                onContextMenu={(e) => handleCellContextMenu(e, employee.id, day)}
+                                className={`w-8 h-full border-r border-slate-300 flex items-center justify-center text-[10px] font-bold select-none
+                                    ${!shift && isOff ? 'bg-sky-50' : ''} 
+                                    ${shift ? shift.color : 'bg-transparent'} 
+                                    ${shift?.textColor ? shift.textColor : 'text-slate-700'}
+                                    ${selected ? 'ring-2 ring-inset ring-blue-600 bg-blue-100/50' : ''}
+                                    hover:brightness-95 hover:z-10
+                                    ${isReadOnly ? 'cursor-default' : 'cursor-pointer'}
+                                `}>
+                                {shift ? shift.code : ''}
+                            </div>
+                        );
+                    })}
+                    
+                    {/* Right Cols (Stats) - Inline now */}
+                     <div className="w-16 flex-shrink-0 border-r border-slate-300 flex items-center justify-center text-[10px] bg-slate-50 font-bold text-slate-700">{stats.daysOff}</div>
+                     <div className="w-10 flex-shrink-0 border-r border-slate-300 flex items-center justify-center bg-slate-50">
                         {validation.valid ? (
                             <span className="text-green-500 font-bold">✔</span>
                         ) : (
@@ -387,31 +570,32 @@ export const RosterGrid: React.FC<Props> = ({ employees, shifts, currentSchedule
                         )}
                     </div>
                 </div>
-            );
-            })}
-        </div>
+            </div>
+        );
+        })}
       </div>
 
-      {/* Footer (Simplified for this update to focus on sync) */}
-      <div className="bg-slate-50 border-t border-slate-300 shadow-inner flex flex-col shrink-0 print:hidden">
-          <div className="flex h-10 border-b border-slate-200">
-             <div className="flex-shrink-0 flex items-center justify-end px-2 font-bold text-[10px] text-slate-700 uppercase bg-slate-100 border-r border-slate-300" style={{ width: totalLeftWidth }}>Total Ativos / Ideal</div>
-             <div className="flex-1 overflow-x-hidden flex no-scrollbar"> 
-                 {/* Manually transform to sync with header scroll */}
-                 <div className="flex min-w-max" style={{ transform: `translateX(-${headerScrollRef.current?.scrollLeft || 0}px)` }}> 
-                     {dailyStats.map(stat => {
-                         const values = Object.values(stat.roleIdeals) as number[];
-                         const globalIdeal = values.reduce((a, b) => a + b, 0);
-                         const isDeficit = stat.totalActive < globalIdeal;
-                         return (
-                            <div key={stat.day} className="w-8 flex flex-col items-center justify-center border-r border-slate-200 text-[9px]">
-                                <span className={`font-bold ${isDeficit ? 'text-red-600' : 'text-slate-800'}`}>{stat.totalActive}</span>
-                            </div>
-                         )
-                     })}
-                 </div>
+      {/* FOOTER: Sticky Bottom */}
+      <div className="bg-slate-50 border-t border-slate-300 shadow-inner flex shrink-0 print:hidden w-fit sticky bottom-0 z-40">
+          <div className="flex h-10 border-b border-slate-200 w-full">
+             <div className="flex-shrink-0 flex items-center justify-end px-2 font-bold text-[10px] text-slate-700 uppercase bg-slate-100 border-r border-slate-300 sticky left-0 z-40" style={{ width: totalLeftWidth }}>
+                 Total Ativos / Ideal
              </div>
-             <div className="w-24 bg-slate-100 border-l border-slate-300"></div>
+             <div className="flex min-w-max"> 
+                 {dailyStats.map(stat => {
+                     const values = Object.values(stat.roleIdeals) as number[];
+                     const globalIdeal = values.reduce((a, b) => a + b, 0);
+                     const isDeficit = stat.totalActive < globalIdeal;
+                     return (
+                        <div key={stat.day} className="w-8 flex flex-col items-center justify-center border-r border-slate-200 text-[9px]">
+                            <span className={`font-bold ${isDeficit ? 'text-red-600' : 'text-slate-800'}`}>{stat.totalActive}</span>
+                        </div>
+                     )
+                 })}
+                 {/* Spacer for Right Cols in Footer */}
+                 <div className="w-16 border-r border-slate-200 bg-slate-100"></div>
+                 <div className="w-10 border-r border-slate-200 bg-slate-100"></div>
+             </div>
           </div>
       </div>
     </div>

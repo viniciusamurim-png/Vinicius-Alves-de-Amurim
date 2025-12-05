@@ -1,11 +1,11 @@
 {
-  "name": "copy-of-novo_escala_fácil_ai",
+  "name": "novo_escala_fácil_ai",
   "private": true,
   "version": "0.0.0",
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "vite build --base=/Vinicius-Alves-de-Amurim/",
+    "build": "vite build",
     "preview": "vite preview"
   },
   "dependencies": {

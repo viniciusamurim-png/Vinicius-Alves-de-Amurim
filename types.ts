@@ -6,6 +6,7 @@ export interface User {
   name: string;
   role: 'admin' | 'manager' | 'viewer'; // Admin: all; Manager: edit allowed units; Viewer: read-only allowed units
   allowedUnits?: string[]; // If empty/undefined for admin, means all. For others, restricts view.
+  allowedSectors?: string[]; // New: Granular control within units
 }
 
 export interface Employee {
@@ -79,3 +80,15 @@ export interface StaffingDayConfig {
 }
 
 export type StaffingConfig = Record<string, StaffingDayConfig>;
+
+export interface GridSelection {
+  startRow: number;
+  startCol: number; // Day number
+  endRow: number;
+  endCol: number;
+}
+
+export interface GridProps {
+    onUndo?: () => void;
+    onRedo?: () => void;
+}

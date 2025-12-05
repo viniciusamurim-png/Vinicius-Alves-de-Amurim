@@ -1,4 +1,5 @@
-import React, { useState, useMemo, useEffect } from 'react';
+
+import React, { useState, useMemo, useEffect, useCallback } from 'react';
 import { INITIAL_EMPLOYEES, INITIAL_SHIFTS, MONTH_NAMES, INITIAL_UNITS, INITIAL_SECTORS, INITIAL_SHIFT_TYPES } from './constants';
 import { Employee, MonthlySchedule, Shift, AIRulesConfig, StaffingConfig, User } from './types';
 import { EmployeeManager } from './components/EmployeeManager';
@@ -14,6 +15,7 @@ import { generateAISchedule } from './services/schedulerService';
 import { Tooltip } from './components/Tooltip';
 import { EmployeeDatabaseScreen } from './components/EmployeeDatabaseScreen';
 import { MultiSelect } from './components/MultiSelect';
+import { ReportsScreen } from './components/ReportsScreen';
 
 // Icons
 const SaveIcon = ({ saved }: { saved: boolean }) => (
@@ -28,7 +30,7 @@ const ChartBarIcon = () => <svg xmlns="http://www.w3.org/2000/svg" fill="none" v
 
 const App: React.FC = () => {
   const [currentUser, setCurrentUser] = useState<User | null>(null);
-  const [currentView, setCurrentView] = useState<'roster' | 'database'>('roster');
+  const [currentView, setCurrentView] = useState<'roster' | 'database' | 'reports'>('roster');
 
   const [employees, setEmployees] = useState<Employee[]>(INITIAL_EMPLOYEES);
   const [shifts, setShifts] = useState<Shift[]>(INITIAL_SHIFTS);
@@ -47,7 +49,44 @@ const App: React.FC = () => {
   const [aiRules, setAiRules] = useState<AIRulesConfig>({ maxConsecutiveDays: 6, minRestHours: 11, preferSundayOff: true, sundayOffFrequency: 2, preferConsecutiveDaysOff: true });
   const [staffingConfig, setStaffingConfig] = useState<StaffingConfig>({});
   
-  const [schedule, setSchedule] = useState<MonthlySchedule>({ month: currentDate.getMonth(), year: currentDate.getFullYear(), assignments: {} });
+  // SCHEDULE STATE + HISTORY
+  const [schedule, setScheduleState] = useState<MonthlySchedule>({ month: currentDate.getMonth(), year: currentDate.getFullYear(), assignments: {} });
+  const [historyPast, setHistoryPast] = useState<MonthlySchedule[]>([]);
+  const [historyFuture, setHistoryFuture] = useState<MonthlySchedule[]>([]);
+
+  // Wrapper to set Schedule and push to history
+  const setSchedule = useCallback((value: React.SetStateAction<MonthlySchedule>) => {
+      setScheduleState(prev => {
+          const next = typeof value === 'function' ? value(prev) : value;
+          // Only push to history if it's different (shallow check for assignments ref usually enough if immutable)
+          if (next !== prev) {
+              setHistoryPast(past => [...past, prev]);
+              setHistoryFuture([]); // Clear future on new action
+          }
+          return next;
+      });
+  }, []);
+
+  const handleUndo = useCallback(() => {
+      if (historyPast.length === 0) return;
+      const previous = historyPast[historyPast.length - 1];
+      const newPast = historyPast.slice(0, -1);
+      
+      setHistoryFuture(future => [schedule, ...future]);
+      setScheduleState(previous);
+      setHistoryPast(newPast);
+  }, [historyPast, schedule]);
+
+  const handleRedo = useCallback(() => {
+      if (historyFuture.length === 0) return;
+      const next = historyFuture[0];
+      const newFuture = historyFuture.slice(1);
+
+      setHistoryPast(past => [...past, schedule]);
+      setScheduleState(next);
+      setHistoryFuture(newFuture);
+  }, [historyFuture, schedule]);
+
   const [isGenerating, setIsGenerating] = useState(false);
   const [isSaved, setIsSaved] = useState(false);
   
@@ -62,13 +101,21 @@ const App: React.FC = () => {
 
   // Load Data on Start
   useEffect(() => {
+    // Session
+    const session = localStorage.getItem('CURRENT_SESSION');
+    if (session) {
+        try {
+            setCurrentUser(JSON.parse(session));
+        } catch(e) { console.error("Session parse error", e); }
+    }
+
     const savedData = localStorage.getItem('ESCALA_FACIL_DATA');
     if (savedData) {
         try {
             const parsed = JSON.parse(savedData);
             if(parsed.employees) setEmployees(parsed.employees);
             if(parsed.shifts) setShifts(parsed.shifts);
-            if(parsed.schedule) setSchedule(parsed.schedule);
+            if(parsed.schedule) setScheduleState(parsed.schedule); // Direct set to avoid history on load
             if(parsed.aiRules) setAiRules(parsed.aiRules);
             if(parsed.staffingConfig) setStaffingConfig(parsed.staffingConfig);
             if(parsed.units) setUnits(parsed.units);
@@ -80,12 +127,26 @@ const App: React.FC = () => {
     }
   }, []);
 
-  // Save Data
+  // Handle Login & Session Save
+  const handleLogin = (user: User) => {
+      setCurrentUser(user);
+      localStorage.setItem('CURRENT_SESSION', JSON.stringify(user));
+  };
+
+  const handleLogout = () => {
+      setCurrentUser(null);
+      localStorage.removeItem('CURRENT_SESSION');
+  };
+
+  // Save Data & Session
   const handleSaveData = () => {
       const dataToSave = {
           employees, shifts, schedule, aiRules, staffingConfig, units, sectors, shiftTypesList
       };
       localStorage.setItem('ESCALA_FACIL_DATA', JSON.stringify(dataToSave));
+      if (currentUser) {
+          localStorage.setItem('CURRENT_SESSION', JSON.stringify(currentUser));
+      }
       setIsSaved(true);
       setTimeout(() => setIsSaved(false), 2000); // Visual feedback
   };
@@ -119,8 +180,14 @@ const App: React.FC = () => {
   const filteredEmployees = useMemo(() => {
       return employees.filter(emp => {
         // User Restriction
-        if (currentUser?.role !== 'admin' && currentUser?.allowedUnits && currentUser.allowedUnits.length > 0) {
-            if (!currentUser.allowedUnits.includes(emp.unit)) return false;
+        if (currentUser?.role !== 'admin') {
+            if (currentUser?.allowedUnits && currentUser.allowedUnits.length > 0) {
+                if (!currentUser.allowedUnits.includes(emp.unit)) return false;
+            }
+            // Sector Restriction (New)
+            if (currentUser?.allowedSectors && currentUser.allowedSectors.length > 0) {
+                if (!currentUser.allowedSectors.includes(emp.sector)) return false;
+            }
         }
 
         const matchUnit = selectedUnits.length === 0 || selectedUnits.includes(emp.unit);
@@ -135,6 +202,9 @@ const App: React.FC = () => {
     const newDate = new Date(currentDate.getFullYear(), currentDate.getMonth() + offset, 1);
     setCurrentDate(newDate);
     setSchedule(prev => ({ ...prev, month: newDate.getMonth(), year: newDate.getFullYear() }));
+    // Reset history when month changes
+    setHistoryPast([]);
+    setHistoryFuture([]);
   };
 
   const handleAutoGenerate = async () => {
@@ -158,15 +228,15 @@ const App: React.FC = () => {
   const isAdmin = currentUser?.role === 'admin';
 
   if (!currentUser) {
-      return <LoginScreen onLogin={setCurrentUser} />;
+      return <LoginScreen onLogin={handleLogin} />;
   }
 
   return (
-    <div className="flex flex-col h-screen bg-slate-100 overflow-hidden font-sans">
+    <div className="flex flex-col h-screen w-screen bg-slate-100 overflow-hidden font-sans">
       
       {/* Header - Hidden on Print */}
-      <header className="bg-company-blue text-white shadow-lg z-50 flex flex-col shrink-0 print:hidden">
-        <div className="flex items-center justify-between px-6 py-2 border-b border-blue-900">
+      <header className="bg-company-blue text-white shadow-lg z-50 flex flex-col shrink-0 print:hidden w-full">
+        <div className="flex items-center justify-between px-6 py-2 border-b border-blue-900 w-full">
             <div className="flex items-center gap-8">
                  <div className="flex items-center gap-2">
                     <div className="w-8 h-8 bg-white rounded text-company-blue flex items-center justify-center font-bold text-xl">PS</div>
@@ -188,9 +258,15 @@ const App: React.FC = () => {
                             onClick={() => setCurrentView('database')}
                             className={`px-4 py-1.5 rounded text-xs font-bold uppercase transition-all ${currentView === 'database' ? 'bg-white text-company-blue shadow' : 'text-blue-200 hover:text-white hover:bg-white/10'}`}
                          >
-                             Base de Colaboradores
+                             Cadastros
                          </button>
                      )}
+                     <button 
+                        onClick={() => setCurrentView('reports')}
+                        className={`px-4 py-1.5 rounded text-xs font-bold uppercase transition-all ${currentView === 'reports' ? 'bg-white text-company-blue shadow' : 'text-blue-200 hover:text-white hover:bg-white/10'}`}
+                     >
+                         Relatórios
+                     </button>
                  </div>
             </div>
 
@@ -207,13 +283,13 @@ const App: React.FC = () => {
                {isAdmin && (
                    <button onClick={() => setShowUserMgmt(true)} className="text-xs bg-blue-800 px-2 py-1 rounded hover:bg-blue-700">Usuários</button>
                )}
-               <button onClick={() => setCurrentUser(null)} className="text-xs text-red-300 hover:text-red-100 underline">Sair</button>
+               <button onClick={handleLogout} className="text-xs text-red-300 hover:text-red-100 underline">Sair</button>
             </div>
         </div>
 
         {/* Toolbar - Only for Roster View */}
         {currentView === 'roster' && (
-            <div className="bg-[#003399] px-6 py-2 flex items-center gap-6 shadow-inner shrink-0 text-white z-40 relative">
+            <div className="bg-[#003399] px-6 py-2 flex items-center gap-6 shadow-inner shrink-0 text-white z-40 relative w-full">
                 
                 <MultiSelect 
                     label="Unidade" 
@@ -289,9 +365,9 @@ const App: React.FC = () => {
         )}
       </header>
 
-      <main className="flex-1 overflow-hidden relative print:p-0 print:overflow-visible bg-white z-0">
+      <main className="flex-1 flex flex-col overflow-hidden relative print:p-0 print:overflow-visible bg-white z-0 w-full h-full">
           {currentView === 'roster' ? (
-               <div className="h-full p-4 print:p-0">
+               <div className="flex-1 flex flex-col h-full w-full p-0 print:p-0 overflow-hidden">
                     <RosterGrid 
                         employees={filteredEmployees} 
                         shifts={shifts} 
@@ -300,6 +376,8 @@ const App: React.FC = () => {
                         rules={aiRules} 
                         staffingConfig={staffingConfig}
                         isReadOnly={!canEdit} 
+                        onUndo={handleUndo}
+                        onRedo={handleRedo}
                         onReorderEmployees={(a,b) => {
                             if (!canEdit) return;
                             const newOrder = [...employees];
@@ -312,8 +390,8 @@ const App: React.FC = () => {
                             }
                         }}/>
                </div>
-          ) : (
-               <div className="h-full">
+          ) : currentView === 'database' ? (
+               <div className="h-full w-full">
                     <EmployeeDatabaseScreen 
                         employees={employees} 
                         setEmployees={setEmployees}
@@ -322,6 +400,12 @@ const App: React.FC = () => {
                         shiftTypes={shiftTypesList}
                     />
                </div>
+          ) : (
+                <ReportsScreen 
+                    employees={filteredEmployees}
+                    schedule={schedule}
+                    shifts={shifts}
+                />
           )}
       </main>
 
@@ -330,7 +414,7 @@ const App: React.FC = () => {
       {showShifts && <ShiftManager shifts={shifts} setShifts={setShifts} onClose={() => setShowShifts(false)} />}
       <RulesModal isOpen={showRules} onClose={() => setShowRules(false)} rules={aiRules} setRules={setAiRules} />
       <StaffingModal isOpen={showStaffing} onClose={() => setShowStaffing(false)} employees={employees} config={staffingConfig} setConfig={setStaffingConfig} />
-      {showUserMgmt && <UserManagement onClose={() => setShowUserMgmt(false)} availableUnits={units} />}
+      {showUserMgmt && <UserManagement onClose={() => setShowUserMgmt(false)} availableUnits={units} employees={employees} />}
       
       <FilterManagerModal 
         isOpen={filterManager.isOpen} 
