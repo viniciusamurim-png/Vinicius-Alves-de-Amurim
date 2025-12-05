@@ -29,7 +29,8 @@ export interface Employee {
   admissionDate?: string;
   email?: string;
   gender?: string;
-  workTime?: string; // Added field: Horário
+  workTime?: string;
+  lastDayOff?: string; // UF: Última Folga (YYYY-MM-DD)
 }
 
 export type ShiftCategory = 'work' | 'dayoff' | 'absence' | 'leave';
@@ -49,10 +50,16 @@ export interface Shift {
 
 export type ScheduleMap = Record<string, string>;
 
+export interface AttachmentData {
+    name: string;
+    data: string; // Base64 string
+}
+
 export interface MonthlySchedule {
   month: number; 
   year: number;
   assignments: Record<string, ScheduleMap>; 
+  attachments?: Record<string, Record<string, AttachmentData>>; // employeeId -> dateKey -> {name, data}
 }
 
 export interface ValidationResult {

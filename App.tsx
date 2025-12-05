@@ -36,12 +36,12 @@ const App: React.FC = () => {
   const [shifts, setShifts] = useState<Shift[]>(INITIAL_SHIFTS);
   const [currentDate, setCurrentDate] = useState(new Date());
 
-  // Dynamic Lists for Filters (Master Lists)
+  // Dynamic Lists for Filters
   const [units, setUnits] = useState<string[]>(INITIAL_UNITS);
   const [sectors, setSectors] = useState<string[]>(INITIAL_SECTORS);
   const [shiftTypesList, setShiftTypesList] = useState<string[]>(INITIAL_SHIFT_TYPES);
 
-  // Filter States (Arrays for Multi-Select)
+  // Filter States
   const [selectedUnits, setSelectedUnits] = useState<string[]>([]);
   const [selectedSectors, setSelectedSectors] = useState<string[]>([]);
   const [selectedShiftTypes, setSelectedShiftTypes] = useState<string[]>([]);
@@ -49,19 +49,17 @@ const App: React.FC = () => {
   const [aiRules, setAiRules] = useState<AIRulesConfig>({ maxConsecutiveDays: 6, minRestHours: 11, preferSundayOff: true, sundayOffFrequency: 2, preferConsecutiveDaysOff: true });
   const [staffingConfig, setStaffingConfig] = useState<StaffingConfig>({});
   
-  // SCHEDULE STATE + HISTORY
-  const [schedule, setScheduleState] = useState<MonthlySchedule>({ month: currentDate.getMonth(), year: currentDate.getFullYear(), assignments: {} });
+  // SCHEDULE STATE
+  const [schedule, setScheduleState] = useState<MonthlySchedule>({ month: currentDate.getMonth(), year: currentDate.getFullYear(), assignments: {}, attachments: {} });
   const [historyPast, setHistoryPast] = useState<MonthlySchedule[]>([]);
   const [historyFuture, setHistoryFuture] = useState<MonthlySchedule[]>([]);
 
-  // Wrapper to set Schedule and push to history
   const setSchedule = useCallback((value: React.SetStateAction<MonthlySchedule>) => {
       setScheduleState(prev => {
           const next = typeof value === 'function' ? value(prev) : value;
-          // Only push to history if it's different (shallow check for assignments ref usually enough if immutable)
           if (next !== prev) {
               setHistoryPast(past => [...past, prev]);
-              setHistoryFuture([]); // Clear future on new action
+              setHistoryFuture([]);
           }
           return next;
       });
@@ -71,7 +69,6 @@ const App: React.FC = () => {
       if (historyPast.length === 0) return;
       const previous = historyPast[historyPast.length - 1];
       const newPast = historyPast.slice(0, -1);
-      
       setHistoryFuture(future => [schedule, ...future]);
       setScheduleState(previous);
       setHistoryPast(newPast);
@@ -81,33 +78,26 @@ const App: React.FC = () => {
       if (historyFuture.length === 0) return;
       const next = historyFuture[0];
       const newFuture = historyFuture.slice(1);
-
       setHistoryPast(past => [...past, schedule]);
       setScheduleState(next);
       setHistoryFuture(newFuture);
   }, [historyFuture, schedule]);
 
   const [isGenerating, setIsGenerating] = useState(false);
+  const [generationProgress, setGenerationProgress] = useState({ current: 0, total: 0 });
   const [isSaved, setIsSaved] = useState(false);
   
-  // Modals
   const [showEmployees, setShowEmployees] = useState(false);
   const [showShifts, setShowShifts] = useState(false);
   const [showRules, setShowRules] = useState(false);
   const [showStaffing, setShowStaffing] = useState(false);
   const [showUserMgmt, setShowUserMgmt] = useState(false);
-  
   const [filterManager, setFilterManager] = useState<{ isOpen: boolean, type: 'Unit' | 'Sector' | 'Shift' | null }>({ isOpen: false, type: null });
 
-  // Load Data on Start
+  // Load Data
   useEffect(() => {
-    // Session
     const session = localStorage.getItem('CURRENT_SESSION');
-    if (session) {
-        try {
-            setCurrentUser(JSON.parse(session));
-        } catch(e) { console.error("Session parse error", e); }
-    }
+    if (session) { try { setCurrentUser(JSON.parse(session)); } catch(e) { console.error("Session parse error", e); } }
 
     const savedData = localStorage.getItem('ESCALA_FACIL_DATA');
     if (savedData) {
@@ -115,85 +105,55 @@ const App: React.FC = () => {
             const parsed = JSON.parse(savedData);
             if(parsed.employees) setEmployees(parsed.employees);
             if(parsed.shifts) setShifts(parsed.shifts);
-            if(parsed.schedule) setScheduleState(parsed.schedule); // Direct set to avoid history on load
+            if(parsed.schedule) setScheduleState(parsed.schedule);
             if(parsed.aiRules) setAiRules(parsed.aiRules);
             if(parsed.staffingConfig) setStaffingConfig(parsed.staffingConfig);
             if(parsed.units) setUnits(parsed.units);
             if(parsed.sectors) setSectors(parsed.sectors);
             if(parsed.shiftTypesList) setShiftTypesList(parsed.shiftTypesList);
-        } catch (e) {
-            console.error("Failed to load saved data", e);
-        }
+        } catch (e) { console.error("Failed to load saved data", e); }
     }
   }, []);
 
-  // Handle Login & Session Save
-  const handleLogin = (user: User) => {
-      setCurrentUser(user);
-      localStorage.setItem('CURRENT_SESSION', JSON.stringify(user));
-  };
+  const handleLogin = (user: User) => { setCurrentUser(user); localStorage.setItem('CURRENT_SESSION', JSON.stringify(user)); };
+  const handleLogout = () => { setCurrentUser(null); localStorage.removeItem('CURRENT_SESSION'); };
 
-  const handleLogout = () => {
-      setCurrentUser(null);
-      localStorage.removeItem('CURRENT_SESSION');
-  };
-
-  // Save Data & Session
   const handleSaveData = () => {
-      const dataToSave = {
-          employees, shifts, schedule, aiRules, staffingConfig, units, sectors, shiftTypesList
-      };
+      const dataToSave = { employees, shifts, schedule, aiRules, staffingConfig, units, sectors, shiftTypesList };
       localStorage.setItem('ESCALA_FACIL_DATA', JSON.stringify(dataToSave));
-      if (currentUser) {
-          localStorage.setItem('CURRENT_SESSION', JSON.stringify(currentUser));
-      }
+      if (currentUser) { localStorage.setItem('CURRENT_SESSION', JSON.stringify(currentUser)); }
       setIsSaved(true);
-      setTimeout(() => setIsSaved(false), 2000); // Visual feedback
+      setTimeout(() => setIsSaved(false), 2000);
   };
 
-  // Sync employees units/sectors with lists
+  // Sync Lists
   useEffect(() => {
       const newUnits = new Set(units);
       const newSectors = new Set(sectors);
       const newTypes = new Set(shiftTypesList);
-      
       let changed = false;
       employees.forEach(e => {
           if(e.unit && !newUnits.has(e.unit)) { newUnits.add(e.unit); changed = true; }
           if(e.sector && !newSectors.has(e.sector)) { newSectors.add(e.sector); changed = true; }
           if(e.shiftType && !newTypes.has(e.shiftType)) { newTypes.add(e.shiftType); changed = true; }
       });
-
-      if(changed) {
-          setUnits(Array.from(newUnits).sort());
-          setSectors(Array.from(newSectors).sort());
-          setShiftTypesList(Array.from(newTypes).sort());
-      }
+      if(changed) { setUnits(Array.from(newUnits).sort()); setSectors(Array.from(newSectors).sort()); setShiftTypesList(Array.from(newTypes).sort()); }
   }, [employees]);
 
-  // DERIVED LISTS FOR ROSTER FILTERS (Strict Mode)
+  // Derived Active Lists for Filters
   const activeUnits = useMemo(() => Array.from(new Set(employees.map(e => e.unit).filter(Boolean))).sort(), [employees]);
   const activeSectors = useMemo(() => Array.from(new Set(employees.map(e => e.sector).filter(Boolean))).sort(), [employees]);
   const activeShiftTypes = useMemo(() => Array.from(new Set(employees.map(e => e.shiftType).filter(Boolean))).sort(), [employees]);
 
-  // Apply Filters
   const filteredEmployees = useMemo(() => {
       return employees.filter(emp => {
-        // User Restriction
         if (currentUser?.role !== 'admin') {
-            if (currentUser?.allowedUnits && currentUser.allowedUnits.length > 0) {
-                if (!currentUser.allowedUnits.includes(emp.unit)) return false;
-            }
-            // Sector Restriction (New)
-            if (currentUser?.allowedSectors && currentUser.allowedSectors.length > 0) {
-                if (!currentUser.allowedSectors.includes(emp.sector)) return false;
-            }
+            if (currentUser?.allowedUnits && currentUser.allowedUnits.length > 0) { if (!currentUser.allowedUnits.includes(emp.unit)) return false; }
+            if (currentUser?.allowedSectors && currentUser.allowedSectors.length > 0) { if (!currentUser.allowedSectors.includes(emp.sector)) return false; }
         }
-
         const matchUnit = selectedUnits.length === 0 || selectedUnits.includes(emp.unit);
         const matchSector = selectedSectors.length === 0 || selectedSectors.includes(emp.sector);
         const matchShift = selectedShiftTypes.length === 0 || selectedShiftTypes.includes(emp.shiftType);
-        
         return matchUnit && matchSector && matchShift;
       });
   }, [employees, selectedUnits, selectedSectors, selectedShiftTypes, currentUser]);
@@ -202,74 +162,43 @@ const App: React.FC = () => {
     const newDate = new Date(currentDate.getFullYear(), currentDate.getMonth() + offset, 1);
     setCurrentDate(newDate);
     setSchedule(prev => ({ ...prev, month: newDate.getMonth(), year: newDate.getFullYear() }));
-    // Reset history when month changes
-    setHistoryPast([]);
-    setHistoryFuture([]);
+    setHistoryPast([]); setHistoryFuture([]);
   };
 
   const handleAutoGenerate = async () => {
     if (!process.env.API_KEY) { alert("API Key não encontrada."); return; }
     if (filteredEmployees.length === 0) { alert("Nenhum colaborador visível."); return; }
+    
     setIsGenerating(true);
-    const result = await generateAISchedule(filteredEmployees, shifts, schedule.month, schedule.year, aiRules);
-    if (result) {
-        setSchedule(prev => ({ ...prev, assignments: { ...prev.assignments, ...result } }));
-    } else {
-        alert("Erro ao gerar escala. Tente novamente.");
-    }
+    setGenerationProgress({ current: 0, total: filteredEmployees.length });
+
+    const result = await generateAISchedule(filteredEmployees, shifts, schedule.month, schedule.year, aiRules, (current, total) => setGenerationProgress({ current, total }));
+
+    if (result) { setSchedule(prev => ({ ...prev, assignments: { ...prev.assignments, ...result } })); } else { alert("Erro ao gerar escala."); }
     setIsGenerating(false);
   };
 
-  const handlePrint = () => {
-      window.print();
-  };
-
+  const handlePrint = () => window.print();
   const canEdit = currentUser?.role === 'admin' || currentUser?.role === 'manager';
   const isAdmin = currentUser?.role === 'admin';
 
-  if (!currentUser) {
-      return <LoginScreen onLogin={handleLogin} />;
-  }
+  if (!currentUser) return <LoginScreen onLogin={handleLogin} />;
 
   return (
     <div className="flex flex-col h-screen w-screen bg-slate-100 overflow-hidden font-sans">
-      
-      {/* Header - Hidden on Print */}
       <header className="bg-company-blue text-white shadow-lg z-50 flex flex-col shrink-0 print:hidden w-full">
         <div className="flex items-center justify-between px-6 py-2 border-b border-blue-900 w-full">
             <div className="flex items-center gap-8">
                  <div className="flex items-center gap-2">
                     <div className="w-8 h-8 bg-white rounded text-company-blue flex items-center justify-center font-bold text-xl">PS</div>
-                    <div>
-                        <h1 className="text-lg font-bold tracking-tight leading-none">ESCALA FÁCIL</h1>
-                        <p className="text-[10px] text-blue-200 tracking-wider uppercase">PREVENT SENIOR</p>
-                    </div>
+                    <div><h1 className="text-lg font-bold tracking-tight leading-none">ESCALA FÁCIL</h1><p className="text-[10px] text-blue-200 tracking-wider uppercase">PREVENT SENIOR</p></div>
                  </div>
-                 
                  <div className="flex gap-1 bg-blue-900/50 p-1 rounded-lg">
-                     <button 
-                        onClick={() => setCurrentView('roster')}
-                        className={`px-4 py-1.5 rounded text-xs font-bold uppercase transition-all ${currentView === 'roster' ? 'bg-white text-company-blue shadow' : 'text-blue-200 hover:text-white hover:bg-white/10'}`}
-                     >
-                         Escala Mensal
-                     </button>
-                     {isAdmin && (
-                         <button 
-                            onClick={() => setCurrentView('database')}
-                            className={`px-4 py-1.5 rounded text-xs font-bold uppercase transition-all ${currentView === 'database' ? 'bg-white text-company-blue shadow' : 'text-blue-200 hover:text-white hover:bg-white/10'}`}
-                         >
-                             Cadastros
-                         </button>
-                     )}
-                     <button 
-                        onClick={() => setCurrentView('reports')}
-                        className={`px-4 py-1.5 rounded text-xs font-bold uppercase transition-all ${currentView === 'reports' ? 'bg-white text-company-blue shadow' : 'text-blue-200 hover:text-white hover:bg-white/10'}`}
-                     >
-                         Relatórios
-                     </button>
+                     <button onClick={() => setCurrentView('roster')} className={`px-4 py-1.5 rounded text-xs font-bold uppercase transition-all ${currentView === 'roster' ? 'bg-white text-company-blue shadow' : 'text-blue-200 hover:text-white hover:bg-white/10'}`}>Escala Mensal</button>
+                     {isAdmin && (<button onClick={() => setCurrentView('database')} className={`px-4 py-1.5 rounded text-xs font-bold uppercase transition-all ${currentView === 'database' ? 'bg-white text-company-blue shadow' : 'text-blue-200 hover:text-white hover:bg-white/10'}`}>Cadastros</button>)}
+                     <button onClick={() => setCurrentView('reports')} className={`px-4 py-1.5 rounded text-xs font-bold uppercase transition-all ${currentView === 'reports' ? 'bg-white text-company-blue shadow' : 'text-blue-200 hover:text-white hover:bg-white/10'}`}>Relatórios</button>
                  </div>
             </div>
-
             {currentView === 'roster' && (
                 <div className="flex items-center bg-blue-900 rounded p-1">
                     <button onClick={() => handleMonthChange(-1)} className="p-1 hover:bg-white/10 rounded transition-colors text-white"><span className="text-lg">‹</span></button>
@@ -277,89 +206,23 @@ const App: React.FC = () => {
                     <button onClick={() => handleMonthChange(1)} className="p-1 hover:bg-white/10 rounded transition-colors text-white"><span className="text-lg">›</span></button>
                 </div>
             )}
-            
             <div className="flex items-center gap-3">
                <span className="text-xs text-blue-300 border-r border-blue-700 pr-3 mr-1">Olá, {currentUser.name}</span>
-               {isAdmin && (
-                   <button onClick={() => setShowUserMgmt(true)} className="text-xs bg-blue-800 px-2 py-1 rounded hover:bg-blue-700">Usuários</button>
-               )}
+               {isAdmin && (<button onClick={() => setShowUserMgmt(true)} className="text-xs bg-blue-800 px-2 py-1 rounded hover:bg-blue-700">Usuários</button>)}
                <button onClick={handleLogout} className="text-xs text-red-300 hover:text-red-100 underline">Sair</button>
             </div>
         </div>
-
-        {/* Toolbar - Only for Roster View */}
         {currentView === 'roster' && (
             <div className="bg-[#003399] px-6 py-2 flex items-center gap-6 shadow-inner shrink-0 text-white z-40 relative w-full">
-                
-                <MultiSelect 
-                    label="Unidade" 
-                    options={activeUnits} 
-                    selected={selectedUnits} 
-                    onChange={setSelectedUnits} 
-                    isAdmin={isAdmin}
-                    onEdit={() => setFilterManager({ isOpen: true, type: 'Unit' })}
-                />
-
-                <MultiSelect 
-                    label="Setor" 
-                    options={activeSectors} 
-                    selected={selectedSectors} 
-                    onChange={setSelectedSectors}
-                    isAdmin={isAdmin}
-                    onEdit={() => setFilterManager({ isOpen: true, type: 'Sector' })}
-                />
-
-                <MultiSelect 
-                    label="Turno" 
-                    options={activeShiftTypes} 
-                    selected={selectedShiftTypes} 
-                    onChange={setSelectedShiftTypes}
-                    isAdmin={isAdmin}
-                    onEdit={() => setFilterManager({ isOpen: true, type: 'Shift' })}
-                />
-                
+                <MultiSelect label="Unidade" options={activeUnits} selected={selectedUnits} onChange={setSelectedUnits} isAdmin={isAdmin} onEdit={() => setFilterManager({ isOpen: true, type: 'Unit' })} />
+                <MultiSelect label="Setor" options={activeSectors} selected={selectedSectors} onChange={setSelectedSectors} isAdmin={isAdmin} onEdit={() => setFilterManager({ isOpen: true, type: 'Sector' })} />
+                <MultiSelect label="Turno" options={activeShiftTypes} selected={selectedShiftTypes} onChange={setSelectedShiftTypes} isAdmin={isAdmin} onEdit={() => setFilterManager({ isOpen: true, type: 'Shift' })} />
                 <div className="flex-1 flex justify-end gap-3 items-end h-full pt-1">
-                    <Tooltip content="Salvar Alterações">
-                        <button onClick={handleSaveData} className="p-2 text-white hover:bg-white/10 rounded-full transition-all">
-                            <SaveIcon saved={isSaved} />
-                        </button>
-                    </Tooltip>
-
-                    <Tooltip content="Imprimir Escala">
-                        <button onClick={handlePrint} className="p-2 text-white hover:bg-white/10 rounded-full transition-all">
-                            <PrintIcon />
-                        </button>
-                    </Tooltip>
-
+                    {isGenerating && (<div className="flex flex-col justify-center min-w-[200px] mr-4"><div className="flex justify-between text-[10px] text-blue-200 mb-1"><span>Gerando...</span><span>{generationProgress.current} / {generationProgress.total}</span></div><div className="w-full bg-blue-900 rounded-full h-2 overflow-hidden"><div className="bg-emerald-400 h-full transition-all duration-300 ease-out" style={{ width: `${(generationProgress.current / generationProgress.total) * 100}%` }}></div></div></div>)}
+                    <Tooltip content="Salvar Alterações"><button onClick={handleSaveData} className="p-2 text-white hover:bg-white/10 rounded-full transition-all"><SaveIcon saved={isSaved} /></button></Tooltip>
+                    <Tooltip content="Imprimir Escala"><button onClick={handlePrint} className="p-2 text-white hover:bg-white/10 rounded-full transition-all"><PrintIcon /></button></Tooltip>
                     <div className="w-px h-8 bg-blue-700 mx-2"></div>
-
-                    {canEdit && (
-                        <>
-                            {isAdmin && (
-                                <>
-                                    <Tooltip content="Legendas & Turnos">
-                                        <button onClick={() => setShowShifts(true)} className="p-2 text-white hover:bg-white/10 rounded-full">
-                                            <TagIcon />
-                                        </button>
-                                    </Tooltip>
-                                </>
-                            )}
-                            <Tooltip content="Regras da IA">
-                                <button onClick={() => setShowRules(true)} className="p-2 text-white hover:bg-white/10 rounded-full">
-                                    <ScaleIcon />
-                                </button>
-                            </Tooltip>
-                            <Tooltip content="Dimensionamento">
-                                <button onClick={() => setShowStaffing(true)} className="p-2 text-white hover:bg-white/10 rounded-full">
-                                    <ChartBarIcon />
-                                </button>
-                            </Tooltip>
-                            
-                            <button onClick={handleAutoGenerate} disabled={isGenerating} className="ml-2 px-4 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold rounded uppercase shadow border border-emerald-400 disabled:opacity-50">
-                                {isGenerating ? '...' : 'Gerar (IA)'}
-                            </button>
-                        </>
-                    )}
+                    {canEdit && (<>{isAdmin && (<Tooltip content="Legendas & Turnos"><button onClick={() => setShowShifts(true)} className="p-2 text-white hover:bg-white/10 rounded-full"><TagIcon /></button></Tooltip>)}<Tooltip content="Regras da IA"><button onClick={() => setShowRules(true)} className="p-2 text-white hover:bg-white/10 rounded-full"><ScaleIcon /></button></Tooltip><Tooltip content="Dimensionamento"><button onClick={() => setShowStaffing(true)} className="p-2 text-white hover:bg-white/10 rounded-full"><ChartBarIcon /></button></Tooltip><button onClick={handleAutoGenerate} disabled={isGenerating} className="ml-2 px-4 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold rounded uppercase shadow border border-emerald-400 disabled:opacity-50">{isGenerating ? 'Parar' : 'Gerar (IA)'}</button></>)}
                 </div>
             </div>
         )}
@@ -368,63 +231,27 @@ const App: React.FC = () => {
       <main className="flex-1 flex flex-col overflow-hidden relative print:p-0 print:overflow-visible bg-white z-0 w-full h-full">
           {currentView === 'roster' ? (
                <div className="flex-1 flex flex-col h-full w-full p-0 print:p-0 overflow-hidden">
-                    <RosterGrid 
-                        employees={filteredEmployees} 
-                        shifts={shifts} 
-                        currentSchedule={schedule} 
-                        setSchedule={setSchedule} 
-                        rules={aiRules} 
-                        staffingConfig={staffingConfig}
-                        isReadOnly={!canEdit} 
-                        onUndo={handleUndo}
-                        onRedo={handleRedo}
+                    <RosterGrid employees={filteredEmployees} shifts={shifts} currentSchedule={schedule} setSchedule={setSchedule} rules={aiRules} staffingConfig={staffingConfig} isReadOnly={!canEdit} onUndo={handleUndo} onRedo={handleRedo}
                         onReorderEmployees={(a,b) => {
                             if (!canEdit) return;
                             const newOrder = [...employees];
                             const from = newOrder.findIndex(e => e.id === a);
                             const to = newOrder.findIndex(e => e.id === b);
-                            if(from >=0 && to >=0) {
-                                const [moved] = newOrder.splice(from, 1);
-                                newOrder.splice(to, 0, moved);
-                                setEmployees(newOrder);
-                            }
+                            if(from >=0 && to >=0) { const [moved] = newOrder.splice(from, 1); newOrder.splice(to, 0, moved); setEmployees(newOrder); }
                         }}/>
                </div>
           ) : currentView === 'database' ? (
-               <div className="h-full w-full">
-                    <EmployeeDatabaseScreen 
-                        employees={employees} 
-                        setEmployees={setEmployees}
-                        units={units}
-                        sectors={sectors}
-                        shiftTypes={shiftTypesList}
-                    />
-               </div>
-          ) : (
-                <ReportsScreen 
-                    employees={filteredEmployees}
-                    schedule={schedule}
-                    shifts={shifts}
-                />
-          )}
+               <div className="h-full w-full"><EmployeeDatabaseScreen employees={employees} setEmployees={setEmployees} units={units} sectors={sectors} shiftTypes={shiftTypesList} /></div>
+          ) : (<ReportsScreen employees={filteredEmployees} schedule={schedule} shifts={shifts} />)}
       </main>
 
-      {/* Modals */}
       {showEmployees && <EmployeeManager employees={employees} setEmployees={setEmployees} onClose={() => setShowEmployees(false)} />}
       {showShifts && <ShiftManager shifts={shifts} setShifts={setShifts} onClose={() => setShowShifts(false)} />}
       <RulesModal isOpen={showRules} onClose={() => setShowRules(false)} rules={aiRules} setRules={setAiRules} />
       <StaffingModal isOpen={showStaffing} onClose={() => setShowStaffing(false)} employees={employees} config={staffingConfig} setConfig={setStaffingConfig} />
       {showUserMgmt && <UserManagement onClose={() => setShowUserMgmt(false)} availableUnits={units} employees={employees} />}
-      
-      <FilterManagerModal 
-        isOpen={filterManager.isOpen} 
-        onClose={() => setFilterManager({ isOpen: false, type: null })} 
-        title={filterManager.type || ''}
-        items={filterManager.type === 'Unit' ? units : filterManager.type === 'Sector' ? sectors : shiftTypesList}
-        setItems={filterManager.type === 'Unit' ? setUnits : filterManager.type === 'Sector' ? setSectors : setShiftTypesList}
-      />
+      <FilterManagerModal isOpen={filterManager.isOpen} onClose={() => setFilterManager({ isOpen: false, type: null })} title={filterManager.type || ''} items={filterManager.type === 'Unit' ? units : filterManager.type === 'Sector' ? sectors : shiftTypesList} setItems={filterManager.type === 'Unit' ? setUnits : filterManager.type === 'Sector' ? setSectors : setShiftTypesList} />
     </div>
   );
 };
-
 export default App;

@@ -10,25 +10,25 @@ export const INITIAL_EMPLOYEES: Employee[] = [
     id: '62036630', name: 'CAMILA CAIRES ALQUIMIM', role: 'ENFERMEIRO LIDER', unit: 'Unidade Central', sector: 'UTI', contractType: 'CLT',
     cpf: '123.456.789-00', positionNumber: '14009423', categoryCode: 'ENF-1234', shiftPattern: '5x2', bankHoursBalance: '10:00', shiftType: 'Diurno',
     organizationalUnit: 'Diretoria Médica', birthDate: '1990-05-15', admissionDate: '2020-01-10', email: 'camila.caires@company.com', gender: 'Feminino',
-    workTime: '07:00 - 17:00'
+    workTime: '07:00 - 17:00', lastDayOff: '2025-09-28'
   },
   { 
     id: '62033733', name: 'ILCA SOFIA DOS SANTOS', role: 'TECNICO DE ENFERMAGEM', unit: 'Unidade Central', sector: 'UTI', contractType: 'CLT',
     cpf: '234.567.890-11', positionNumber: '14010311', categoryCode: 'COREN-SP', shiftPattern: '12x36', bankHoursBalance: '-02:00', shiftType: 'Noturno',
     organizationalUnit: 'Enfermagem Geral', birthDate: '1992-08-20', admissionDate: '2021-03-15', email: 'ilca.sofia@company.com', gender: 'Feminino',
-    workTime: '19:00 - 07:00'
+    workTime: '19:00 - 07:00', lastDayOff: '2025-09-30'
   },
   { 
     id: '62034119', name: 'KAUANE RODRIGUES', role: 'TECNICO DE ENFERMAGEM', unit: 'Unidade Sul', sector: 'Pediatria', contractType: 'CLT',
     cpf: '345.678.901-22', positionNumber: '14007887', categoryCode: 'COREN-SP', shiftPattern: '12x36', bankHoursBalance: '05:30', shiftType: 'Diurno',
     organizationalUnit: 'Enfermagem Pediátrica', birthDate: '1995-12-01', admissionDate: '2022-06-01', email: 'kauane.rodrigues@company.com', gender: 'Feminino',
-    workTime: '07:00 - 19:00'
+    workTime: '07:00 - 19:00', lastDayOff: '2025-09-29'
   },
   { 
     id: '62033902', name: 'MYCHELLY MATIAS MORAES', role: 'RECEPCIONISTA', unit: 'Unidade Sul', sector: 'Recepção', contractType: 'CLT',
     cpf: '456.789.012-33', positionNumber: '14005695', categoryCode: 'ADM', shiftPattern: '6x1', bankHoursBalance: '00:00', shiftType: 'Administrativo',
     organizationalUnit: 'Atendimento', birthDate: '1998-02-10', admissionDate: '2023-01-20', email: 'mychelly.moraes@company.com', gender: 'Feminino',
-    workTime: '08:00 - 17:00'
+    workTime: '08:00 - 17:00', lastDayOff: '2025-09-25'
   },
 ];
 

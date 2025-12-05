@@ -40,7 +40,7 @@ export const EmployeeDatabaseScreen: React.FC<Props> = ({ employees, setEmployee
           id: Date.now().toString(),
           name: '', role: '', unit: units[0], sector: sectors[0], shiftType: shiftTypes[0],
           contractType: 'CLT', cpf: '', positionNumber: '', categoryCode: '', shiftPattern: '5X2', bankHoursBalance: '00:00',
-          organizationalUnit: '', birthDate: '', admissionDate: '', email: '', gender: '', workTime: ''
+          organizationalUnit: '', birthDate: '', admissionDate: '', email: '', gender: '', workTime: '', lastDayOff: ''
       });
   };
 
@@ -168,6 +168,10 @@ export const EmployeeDatabaseScreen: React.FC<Props> = ({ employees, setEmployee
                  </div>
              </div>
              <div>
+                <label className="text-[10px] font-bold uppercase text-slate-500">UF (Última Folga)</label>
+                <input className="w-full border rounded p-2 text-sm" type="date" value={formData.lastDayOff || ''} onChange={e => setFormData({...formData, lastDayOff: e.target.value})} />
+             </div>
+             <div>
                 <label className="text-[10px] font-bold uppercase text-slate-500">Cod. Categoria</label>
                 <input className="w-full border rounded p-2 text-sm" value={formData.categoryCode || ''} onChange={e => setFormData({...formData, categoryCode: e.target.value})} />
              </div>
@@ -244,6 +248,7 @@ export const EmployeeDatabaseScreen: React.FC<Props> = ({ employees, setEmployee
                                       <div className="text-xs font-medium">{emp.shiftPattern} ({emp.shiftType})</div>
                                       <div className="text-[10px] text-slate-600 mb-0.5">{emp.workTime}</div>
                                       <div className="text-[10px] text-green-600 font-bold">BH: {emp.bankHoursBalance}</div>
+                                      <div className="text-[9px] text-slate-400 mt-1">UF: {emp.lastDayOff || '-'}</div>
                                   </td>
                                   <td className="p-3 text-right">
                                       <button onClick={() => handleEdit(emp)} className="text-blue-600 hover:text-blue-800 mr-3 font-bold text-xs uppercase">Editar</button>
