@@ -8,7 +8,7 @@ export default defineConfig(({ mode }) => {
     
     return {
         // MUDE [NOVO-NOME-DO-REPOSITÓRIO] PELO NOME REAL!
-        base: '/Vinicius-Alves-de-Amurim/', 
+        base: '/Escalas-Facil-Version2/', 
         
         server: {
             port: 3000,
