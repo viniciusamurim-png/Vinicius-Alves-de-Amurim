@@ -28,7 +28,8 @@ export interface Employee {
   birthDate?: string;
   admissionDate?: string;
   email?: string;
-  gender?: string; // Added field
+  gender?: string;
+  workTime?: string; // Added field: Horário
 }
 
 export type ShiftCategory = 'work' | 'dayoff' | 'absence' | 'leave';

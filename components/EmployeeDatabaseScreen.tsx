@@ -1,3 +1,4 @@
+
 import React, { useState, useMemo } from 'react';
 import { Employee } from '../types';
 import { ImportModal } from './ImportModal';
@@ -39,7 +40,7 @@ export const EmployeeDatabaseScreen: React.FC<Props> = ({ employees, setEmployee
           id: Date.now().toString(),
           name: '', role: '', unit: units[0], sector: sectors[0], shiftType: shiftTypes[0],
           contractType: 'CLT', cpf: '', positionNumber: '', categoryCode: '', shiftPattern: '5X2', bankHoursBalance: '00:00',
-          organizationalUnit: '', birthDate: '', admissionDate: '', email: '', gender: ''
+          organizationalUnit: '', birthDate: '', admissionDate: '', email: '', gender: '', workTime: ''
       });
   };
 
@@ -152,19 +153,23 @@ export const EmployeeDatabaseScreen: React.FC<Props> = ({ employees, setEmployee
                     <input className="w-full border rounded p-2 text-sm uppercase" value={formData.shiftPattern || ''} onChange={e => setFormData({...formData, shiftPattern: e.target.value})} />
                  </div>
                  <div>
-                    <label className="text-[10px] font-bold uppercase text-slate-500">Saldo BH</label>
-                    <input className="w-full border rounded p-2 text-sm" value={formData.bankHoursBalance || ''} onChange={e => setFormData({...formData, bankHoursBalance: e.target.value})} />
+                    <label className="text-[10px] font-bold uppercase text-slate-500">Horário</label>
+                    <input className="w-full border rounded p-2 text-sm uppercase" placeholder="07:00 - 19:00" value={formData.workTime || ''} onChange={e => setFormData({...formData, workTime: e.target.value})} />
                  </div>
              </div>
              <div className="grid grid-cols-2 gap-2">
                  <div>
+                    <label className="text-[10px] font-bold uppercase text-slate-500">Saldo BH</label>
+                    <input className="w-full border rounded p-2 text-sm" value={formData.bankHoursBalance || ''} onChange={e => setFormData({...formData, bankHoursBalance: e.target.value})} />
+                 </div>
+                 <div>
                     <label className="text-[10px] font-bold uppercase text-slate-500">Nº Posição</label>
                     <input className="w-full border rounded p-2 text-sm uppercase" value={formData.positionNumber || ''} onChange={e => setFormData({...formData, positionNumber: e.target.value})} />
                  </div>
-                 <div>
-                    <label className="text-[10px] font-bold uppercase text-slate-500">Cod. Categoria</label>
-                    <input className="w-full border rounded p-2 text-sm" value={formData.categoryCode || ''} onChange={e => setFormData({...formData, categoryCode: e.target.value})} />
-                 </div>
+             </div>
+             <div>
+                <label className="text-[10px] font-bold uppercase text-slate-500">Cod. Categoria</label>
+                <input className="w-full border rounded p-2 text-sm" value={formData.categoryCode || ''} onChange={e => setFormData({...formData, categoryCode: e.target.value})} />
              </div>
          </div>
          <div className="p-4 border-t bg-slate-50">
@@ -237,7 +242,7 @@ export const EmployeeDatabaseScreen: React.FC<Props> = ({ employees, setEmployee
                                   </td>
                                   <td className="p-3">
                                       <div className="text-xs font-medium">{emp.shiftPattern} ({emp.shiftType})</div>
-                                      <div className="text-[10px] text-slate-500">Adm: {emp.admissionDate}</div>
+                                      <div className="text-[10px] text-slate-600 mb-0.5">{emp.workTime}</div>
                                       <div className="text-[10px] text-green-600 font-bold">BH: {emp.bankHoursBalance}</div>
                                   </td>
                                   <td className="p-3 text-right">

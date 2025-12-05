@@ -28,7 +28,7 @@ interface ContextMenuState {
   columnKey?: string;
 }
 
-type ColumnKey = 'name' | 'id' | 'role' | 'cpf' | 'scale' | 'position' | 'council' | 'bh';
+type ColumnKey = 'name' | 'id' | 'role' | 'cpf' | 'scale' | 'time' | 'position' | 'council' | 'bh';
 
 interface DailyStat {
   day: number;
@@ -58,7 +58,7 @@ export const RosterGrid: React.FC<Props> = ({
   const [frozenColumns, setFrozenColumns] = useState<ColumnKey[]>([]);
 
   const [colWidths, setColWidths] = useState<Record<ColumnKey, number>>({
-      name: 220, id: 80, role: 120, cpf: 100, scale: 80, position: 80, council: 100, bh: 60
+      name: 220, id: 80, role: 120, cpf: 100, scale: 60, time: 80, position: 80, council: 100, bh: 60
   });
   const [resizingCol, setResizingCol] = useState<string | null>(null);
   const startResizeX = useRef(0);
@@ -88,6 +88,7 @@ export const RosterGrid: React.FC<Props> = ({
             case 'role': valA = a.role; valB = b.role; break;
             case 'cpf': valA = a.cpf; valB = b.cpf; break;
             case 'scale': valA = a.shiftPattern; valB = b.shiftPattern; break;
+            case 'time': valA = a.workTime || ''; valB = b.workTime || ''; break;
             case 'position': valA = a.positionNumber; valB = b.positionNumber; break;
             case 'council': valA = a.categoryCode; valB = b.categoryCode; break;
             case 'bh': valA = a.bankHoursBalance; valB = b.bankHoursBalance; break;
@@ -405,7 +406,7 @@ export const RosterGrid: React.FC<Props> = ({
 
   const labelMap: Record<ColumnKey, string> = { 
       name: 'NOME COLABORADOR', id: 'ID', role: 'CARGO', cpf: 'CPF', 
-      scale: 'ESCALA', position: 'Nº POSIÇÃO', council: 'REG. CONSELHO', bh: 'BH' 
+      scale: 'ESCALA', time: 'HORÁRIO', position: 'Nº POSIÇÃO', council: 'REG. CONSELHO', bh: 'BH' 
   };
 
   return (
@@ -510,7 +511,11 @@ export const RosterGrid: React.FC<Props> = ({
                     className="flex-shrink-0 flex border-r border-slate-300 bg-white z-10 group-hover:bg-blue-50 cursor-move sticky left-0"
                 >
                     {visibleColumns.map(key => {
-                        const val = key === 'scale' ? employee.shiftPattern : key === 'position' ? employee.positionNumber : key === 'council' ? employee.categoryCode : key === 'bh' ? employee.bankHoursBalance : (employee as any)[key];
+                        const val = key === 'scale' ? employee.shiftPattern : 
+                                    key === 'time' ? employee.workTime :
+                                    key === 'position' ? employee.positionNumber : 
+                                    key === 'council' ? employee.categoryCode : 
+                                    key === 'bh' ? employee.bankHoursBalance : (employee as any)[key];
                         const colorClass = key === 'bh' ? (val.startsWith('-') ? 'text-red-600' : 'text-green-600 font-bold') : 'text-slate-500';
                         const align = key === 'name' ? 'justify-start px-2' : 'justify-center px-1';
                         const isFrozen = frozenColumns.includes(key);

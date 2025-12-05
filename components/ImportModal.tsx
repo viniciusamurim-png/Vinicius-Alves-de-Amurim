@@ -66,6 +66,7 @@ export const ImportModal: React.FC<Props> = ({ isOpen, onClose, onImport }) => {
                     admissionDate: cols[13] || '',
                     email: cols[14] || '',
                     gender: cols[15] || 'Indefinido',
+                    workTime: cols[16] || '', // Added workTime
 
                     contractType: 'CLT'
                 };
@@ -102,7 +103,7 @@ export const ImportModal: React.FC<Props> = ({ isOpen, onClose, onImport }) => {
              <div className="bg-blue-50 border border-blue-200 rounded p-4 mb-4">
                  <p className="text-sm font-bold text-blue-800 mb-2">Instruções:</p>
                  <code className="block bg-white p-2 border border-blue-200 rounded text-[10px] text-slate-600 font-mono break-all leading-relaxed">
-                    0:Nome, 1:ID, 2:Cargo, 3:CPF, 4:Escala, 5:Posição, 6:Categoria, 7:BH, 8:Unidade, 9:Setor, 10:Turno, 11:Unid. Org, 12:Nascimento, 13:Admissão, 14:Email, 15:Sexo
+                    0:Nome, 1:ID, 2:Cargo, 3:CPF, 4:Escala, 5:Posição, 6:Categoria, 7:BH, 8:Unidade, 9:Setor, 10:Turno, 11:Unid. Org, 12:Nascimento, 13:Admissão, 14:Email, 15:Sexo, 16:Horário
                  </code>
                  <p className="text-[10px] text-blue-600 mt-2">
                      * BH Decimal (ex: 10.5) será convertido para Hora (10:30).
