@@ -108,18 +108,6 @@ export const RosterGrid: React.FC<Props> = ({
   const visibleColumns = (Object.keys(colWidths) as ExtendedColumnKey[]).filter(k => !hiddenColumns.includes(k));
   const totalLeftWidth = visibleColumns.reduce((acc, key) => acc + colWidths[key], 0);
 
-  const getColumnLeftOffset = (key: ExtendedColumnKey) => {
-      let offset = 0;
-      for (const k of visibleColumns) {
-          if (k === key) break;
-          // Only accumulate offset for PREVIOUS frozen columns to stack them
-          if (frozenColumns.includes(k)) {
-             offset += colWidths[k];
-          }
-      }
-      return offset;
-  };
-  
   const getStickyLeft = (key: ExtendedColumnKey) => {
       let offset = 0;
       for (const k of visibleColumns) {
@@ -213,6 +201,9 @@ export const RosterGrid: React.FC<Props> = ({
 
         // --- ARROW NAVIGATION ---
         if (['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(e.key)) {
+            // Check if focus is inside an input (like shiftType)
+            if (document.activeElement?.tagName === 'INPUT') return;
+            
             e.preventDefault();
             if (!focusedCell) {
                 setFocusedCell({ empIndex: 0, day: 1 });
@@ -244,6 +235,9 @@ export const RosterGrid: React.FC<Props> = ({
 
         // DELETE
         if (e.key === 'Delete' || e.key === 'Backspace') {
+            // Check if focus is inside an input (like shiftType)
+            if (document.activeElement?.tagName === 'INPUT') return;
+
             e.preventDefault();
             const minR = Math.min(selection.startRow, selection.endRow);
             const maxR = Math.max(selection.startRow, selection.endRow);
@@ -500,7 +494,18 @@ export const RosterGrid: React.FC<Props> = ({
 
   return (
     <div ref={gridContainerRef} className="roster-bg bg-white rounded shadow-sm border border-slate-300 flex flex-col h-full w-full overflow-auto select-none relative print:border-none print:shadow-none" onMouseUp={handleMouseUp}>
-      {hiddenColumns.length > 0 && (<button onClick={() => setHiddenColumns([])} className="absolute top-1 left-1 z-50 bg-blue-100 text-blue-700 p-1 rounded text-xs print:hidden">Restaurar Colunas</button>)}
+      {hiddenColumns.length > 0 && (
+          <button 
+            onClick={() => setHiddenColumns([])} 
+            title="Restaurar Colunas"
+            className="absolute top-1 left-1 z-50 bg-blue-100 text-blue-700 p-1.5 rounded-full shadow hover:bg-blue-200 print:hidden transition-all"
+          >
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="w-4 h-4">
+                <path d="M10 12.5a2.5 2.5 0 100-5 2.5 2.5 0 000 5z" />
+                <path fillRule="evenodd" d="M.664 10.59a1.651 1.651 0 010-1.186A10.004 10.004 0 0110 3c4.257 0 7.893 2.66 9.336 6.41.147.381.146.804 0 1.186A10.004 10.004 0 0110 17c-4.257 0-7.893-2.66-9.336-6.41zM14 10a4 4 0 11-8 0 4 4 0 018 0z" clipRule="evenodd" />
+            </svg>
+          </button>
+      )}
       
       {/* Hidden File Input for Attachments */}
       <input 
@@ -517,6 +522,7 @@ export const RosterGrid: React.FC<Props> = ({
                   <>
                     <button onClick={() => { if(contextMenu.columnKey) { setFrozenColumns(prev => prev.includes(contextMenu.columnKey as any) ? prev.filter(k=>k!==contextMenu.columnKey) : [...prev, contextMenu.columnKey as any]); setContextMenu(prev=>({...prev, visible:false})); }}} className="w-full text-left px-4 py-2 hover:bg-slate-50 text-xs font-bold text-slate-700">Congelar/Descongelar</button>
                     <button onClick={() => { if(contextMenu.columnKey) setHiddenColumns(prev => [...prev, contextMenu.columnKey as ExtendedColumnKey]); setContextMenu(prev => ({...prev, visible:false}))}} className="w-full text-left px-4 py-2 hover:bg-slate-50 text-xs text-red-600 font-bold border-t">Ocultar Coluna</button>
+                    {hiddenColumns.length > 0 && <button onClick={() => { setHiddenColumns([]); setContextMenu(prev=>({...prev, visible:false})); }} className="w-full text-left px-4 py-2 hover:bg-slate-50 text-xs text-blue-600 font-bold border-t">Mostrar Todas</button>}
                   </>
               ) : contextMenu.isCommentMenu ? (
                   <>
@@ -620,6 +626,8 @@ export const RosterGrid: React.FC<Props> = ({
                                             }
                                         }}
                                         onKeyDown={(e) => {
+                                            // ALLOW DELETE/BACKSPACE TO PROPAGATE LOCALLY BUT STOP IT FROM REACHING GRID
+                                            e.stopPropagation();
                                             if (e.key === 'Enter') e.currentTarget.blur();
                                         }}
                                     />
@@ -654,8 +662,16 @@ export const RosterGrid: React.FC<Props> = ({
                         );
                     })}
                      <div className="w-16 flex-shrink-0 border-r border-slate-300 flex items-center justify-center text-[10px] bg-slate-50 font-bold text-slate-700">{daysOffCount}</div>
-                     <div className="w-10 flex-shrink-0 border-r border-slate-300 flex items-center justify-center bg-slate-50">
-                        {validation.valid ? <span className="text-green-500 font-bold">✔</span> : <Tooltip content={validation.messages.join('\n')}><span className="text-red-500 font-bold cursor-help text-xs">⚠</span></Tooltip>}
+                     <div className="w-10 flex-shrink-0 border-r border-slate-300 flex items-center justify-center bg-slate-50 relative group/st">
+                        {validation.valid ? <span className="text-green-500 font-bold">✔</span> : (
+                            <div className="relative flex justify-center w-full h-full items-center">
+                                <span className="text-red-500 font-bold cursor-help text-xs">⚠</span>
+                                {/* CUSTOM TOOLTIP FOR ST: Wider, Right-Aligned, White-space Pre-line */}
+                                <div className="absolute top-full right-0 mt-1 hidden group-hover/st:block z-[100] w-72 bg-gray-900 text-white text-[10px] p-2 rounded shadow-xl whitespace-pre-line text-left border border-gray-700">
+                                    {validation.messages.join('\n')}
+                                </div>
+                            </div>
+                        )}
                     </div>
                 </div>
             </div>
