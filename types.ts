@@ -31,6 +31,7 @@ export interface Employee {
   gender?: string;
   workTime?: string;
   lastDayOff?: string; // UF: Última Folga (YYYY-MM-DD)
+  terminationDate?: string; // Data de Desligamento (YYYY-MM-DD)
 }
 
 export type ShiftCategory = 'work' | 'dayoff' | 'absence' | 'leave';
@@ -60,6 +61,7 @@ export interface MonthlySchedule {
   year: number;
   assignments: Record<string, ScheduleMap>; 
   attachments?: Record<string, Record<string, AttachmentData>>; // employeeId -> dateKey -> {name, data}
+  comments?: Record<string, Record<string, string>>; // employeeId -> dateKey -> Comment Type (e.g., "Hora Extra")
 }
 
 export interface ValidationResult {
@@ -100,3 +102,6 @@ export interface GridProps {
     onUndo?: () => void;
     onRedo?: () => void;
 }
+
+// Added 'shiftType' to the keys
+export type ExtendedColumnKey = 'name' | 'id' | 'role' | 'cpf' | 'scale' | 'time' | 'shiftType' | 'position' | 'council' | 'bh' | 'uf';

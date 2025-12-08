@@ -1,3 +1,4 @@
+
 import React, { useState, useRef, useEffect } from 'react';
 
 interface Props {
@@ -37,7 +38,7 @@ export const MultiSelect: React.FC<Props> = ({ label, options, selected, onChang
   );
 
   return (
-    <div className="flex flex-col gap-1 relative" ref={containerRef}>
+    <div className="flex flex-col gap-1 relative z-50" ref={containerRef}>
       <div className="flex justify-between items-center">
         <label className="text-[10px] font-bold uppercase text-blue-200 tracking-wider">{label}</label>
         {isAdmin && onEdit && (
@@ -56,7 +57,7 @@ export const MultiSelect: React.FC<Props> = ({ label, options, selected, onChang
       </button>
 
       {isOpen && (
-        <div className="absolute top-full left-0 mt-1 w-64 bg-white border border-slate-300 rounded shadow-xl z-[100] max-h-80 flex flex-col">
+        <div className="absolute top-full left-0 mt-1 w-64 bg-white border border-slate-300 rounded shadow-xl z-[9999] max-h-80 flex flex-col">
             <div className="p-2 border-b bg-slate-50 sticky top-0">
                 <input 
                     type="text" 

@@ -20,15 +20,29 @@ export const ShiftManager: React.FC<Props> = ({ shifts, setShifts, onClose }) =>
 
   const colors = [
      { bg: 'bg-white', text: 'text-slate-900', label: 'Branco' },
-     { bg: 'bg-red-100', text: 'text-red-900', label: 'Vermelho' },
-     { bg: 'bg-green-100', text: 'text-green-900', label: 'Verde' },
-     { bg: 'bg-blue-100', text: 'text-blue-900', label: 'Azul' },
-     { bg: 'bg-yellow-100', text: 'text-yellow-900', label: 'Amarelo' },
-     { bg: 'bg-purple-100', text: 'text-purple-900', label: 'Roxo' },
+     { bg: 'bg-red-100', text: 'text-red-900', label: 'Vermelho Claro' },
+     { bg: 'bg-red-200', text: 'text-red-900', label: 'Vermelho' },
+     { bg: 'bg-green-100', text: 'text-green-900', label: 'Verde Claro' },
+     { bg: 'bg-green-200', text: 'text-green-900', label: 'Verde' },
+     { bg: 'bg-blue-100', text: 'text-blue-900', label: 'Azul Claro' },
+     { bg: 'bg-blue-200', text: 'text-blue-900', label: 'Azul' },
+     { bg: 'bg-yellow-100', text: 'text-yellow-900', label: 'Amarelo Claro' },
+     { bg: 'bg-yellow-200', text: 'text-yellow-900', label: 'Amarelo' },
+     { bg: 'bg-purple-100', text: 'text-purple-900', label: 'Roxo Claro' },
+     { bg: 'bg-purple-200', text: 'text-purple-900', label: 'Roxo' },
      { bg: 'bg-gray-200', text: 'text-gray-800', label: 'Cinza' },
-     { bg: 'bg-orange-100', text: 'text-orange-900', label: 'Laranja' },
-     { bg: 'bg-pink-100', text: 'text-pink-900', label: 'Rosa' },
-     { bg: 'bg-sky-50', text: 'text-slate-900', label: 'Azul Claro' }
+     { bg: 'bg-gray-300', text: 'text-gray-900', label: 'Cinza Escuro' },
+     { bg: 'bg-orange-100', text: 'text-orange-900', label: 'Laranja Claro' },
+     { bg: 'bg-orange-200', text: 'text-orange-900', label: 'Laranja' },
+     { bg: 'bg-pink-100', text: 'text-pink-900', label: 'Rosa Claro' },
+     { bg: 'bg-pink-200', text: 'text-pink-900', label: 'Rosa' },
+     { bg: 'bg-sky-50', text: 'text-slate-900', label: 'Céu' },
+     { bg: 'bg-sky-200', text: 'text-sky-900', label: 'Céu Escuro' },
+     { bg: 'bg-teal-100', text: 'text-teal-900', label: 'Teal' },
+     { bg: 'bg-cyan-100', text: 'text-cyan-900', label: 'Ciano' },
+     { bg: 'bg-indigo-100', text: 'text-indigo-900', label: 'Indigo' },
+     { bg: 'bg-lime-100', text: 'text-lime-900', label: 'Lima' },
+     { bg: 'bg-amber-100', text: 'text-amber-900', label: 'Amber' },
   ];
 
   const categoryMap: Record<string, string> = {
@@ -44,13 +58,12 @@ export const ShiftManager: React.FC<Props> = ({ shifts, setShifts, onClose }) =>
       const isDayOff = formData.category !== 'work';
 
       if (formData.id) {
-          setShifts(shifts.map(s => s.id === formData.id ? { ...s, ...formData, isDayOff } : s));
+          setShifts(prev => prev.map(s => s.id === formData.id ? { ...s, ...formData, isDayOff } : s));
       } else {
           const id = formData.code.toLowerCase().replace(/[^a-z0-9]/g, '_') + '_' + Date.now();
-          setShifts([...shifts, { ...formData, id, isDayOff }]);
+          setShifts(prev => [...prev, { ...formData, id, isDayOff }]);
       }
       
-      // Reset
       setFormData({ id: '', code: '', name: '', category: 'work', startTime: '', endTime: '', color: 'bg-white', textColor: 'text-slate-900', isDayOff: false });
   };
 
@@ -70,7 +83,7 @@ export const ShiftManager: React.FC<Props> = ({ shifts, setShifts, onClose }) =>
 
   const handleDeleteShift = (id: string) => {
       if (confirm('Tem certeza que deseja excluir esta legenda?')) {
-          setShifts(shifts.filter(s => s.id !== id));
+          setShifts(prev => prev.filter(s => s.id !== id));
           if (formData.id === id) {
              setFormData({ id: '', code: '', name: '', category: 'work', startTime: '', endTime: '', color: 'bg-white', textColor: 'text-slate-900', isDayOff: false });
           }
@@ -78,8 +91,8 @@ export const ShiftManager: React.FC<Props> = ({ shifts, setShifts, onClose }) =>
   }
 
   return (
-    <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/50 backdrop-blur-sm p-4">
-      <div className="bg-white rounded-lg shadow-2xl w-full max-w-4xl flex flex-col h-[70vh]">
+    <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/50 backdrop-blur-sm p-4" onClick={onClose}>
+      <div className="bg-white rounded-lg shadow-2xl w-full max-w-4xl flex flex-col h-[80vh]" onClick={e => e.stopPropagation()}>
          <div className="flex items-center justify-between p-4 border-b">
           <h3 className="text-lg font-bold text-slate-800 flex items-center gap-2">
              Configuração de Legendas
@@ -96,15 +109,15 @@ export const ShiftManager: React.FC<Props> = ({ shifts, setShifts, onClose }) =>
                  <div className="space-y-3">
                     <div>
                         <label className="block text-[10px] font-bold text-slate-500 uppercase">Código (Sigla)</label>
-                        <input type="text" maxLength={4} className="w-full border-slate-300 rounded p-2 border uppercase text-sm" value={formData.code} onChange={e => setFormData({...formData, code: e.target.value})} />
+                        <input type="text" maxLength={4} className="w-full border-slate-300 rounded p-2 border uppercase text-sm" value={formData.code} onChange={e => setFormData({...formData, code: e.target.value})} onKeyDown={e => e.stopPropagation()} />
                     </div>
                      <div>
                         <label className="block text-[10px] font-bold text-slate-500 uppercase">Descrição</label>
-                        <input type="text" className="w-full border-slate-300 rounded p-2 border text-sm" value={formData.name} onChange={e => setFormData({...formData, name: e.target.value})} />
+                        <input type="text" className="w-full border-slate-300 rounded p-2 border text-sm" value={formData.name} onChange={e => setFormData({...formData, name: e.target.value})} onKeyDown={e => e.stopPropagation()} />
                     </div>
                     <div>
                          <label className="block text-[10px] font-bold text-slate-500 uppercase">Categoria</label>
-                         <select className="w-full border-slate-300 rounded p-2 border bg-white text-sm" value={formData.category} onChange={e => setFormData({...formData, category: e.target.value as ShiftCategory})}>
+                         <select className="w-full border-slate-300 rounded p-2 border bg-white text-sm" value={formData.category} onChange={e => setFormData({...formData, category: e.target.value as ShiftCategory})} onKeyDown={e => e.stopPropagation()}>
                              <option value="work">Trabalho (Expediente)</option>
                              <option value="dayoff">Folga</option>
                              <option value="absence">Ausência / Falta</option>
@@ -114,21 +127,22 @@ export const ShiftManager: React.FC<Props> = ({ shifts, setShifts, onClose }) =>
                     <div className="grid grid-cols-2 gap-2">
                          <div>
                             <label className="block text-[10px] font-bold text-slate-500 uppercase">Início</label>
-                            <input type="time" disabled={formData.category !== 'work'} className="w-full border-slate-300 rounded p-2 border text-sm disabled:opacity-50" value={formData.startTime} onChange={e => setFormData({...formData, startTime: e.target.value})} />
+                            <input type="time" disabled={formData.category !== 'work'} className="w-full border-slate-300 rounded p-2 border text-sm disabled:opacity-50" value={formData.startTime} onChange={e => setFormData({...formData, startTime: e.target.value})} onKeyDown={e => e.stopPropagation()} />
                         </div>
                         <div>
                             <label className="block text-[10px] font-bold text-slate-500 uppercase">Fim</label>
-                            <input type="time" disabled={formData.category !== 'work'} className="w-full border-slate-300 rounded p-2 border text-sm disabled:opacity-50" value={formData.endTime} onChange={e => setFormData({...formData, endTime: e.target.value})} />
+                            <input type="time" disabled={formData.category !== 'work'} className="w-full border-slate-300 rounded p-2 border text-sm disabled:opacity-50" value={formData.endTime} onChange={e => setFormData({...formData, endTime: e.target.value})} onKeyDown={e => e.stopPropagation()} />
                         </div>
                     </div>
                      <div>
                         <label className="block text-[10px] font-bold text-slate-500 uppercase mb-2">Cor</label>
-                        <div className="grid grid-cols-5 gap-2">
+                        <div className="grid grid-cols-6 gap-2">
                              {colors.map(c => (
                                 <button 
                                     key={c.bg} 
+                                    title={c.label}
                                     onClick={() => setFormData({...formData, color: c.bg, textColor: c.text})}
-                                    className={`w-8 h-8 rounded-full border shadow-sm ${c.bg} ${formData.color === c.bg ? 'ring-2 ring-blue-500 scale-110' : ''}`}
+                                    className={`w-6 h-6 rounded-full border shadow-sm ${c.bg} ${formData.color === c.bg ? 'ring-2 ring-blue-500 scale-110' : ''}`}
                                 />
                             ))}
                         </div>

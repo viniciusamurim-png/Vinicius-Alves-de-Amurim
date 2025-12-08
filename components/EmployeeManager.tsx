@@ -1,3 +1,4 @@
+
 import React, { useState } from 'react';
 import { Employee } from '../types';
 import { INITIAL_UNITS as UNITS, INITIAL_SECTORS as SECTORS, INITIAL_SHIFT_TYPES as SHIFT_TYPES } from '../constants';
@@ -12,7 +13,7 @@ export const EmployeeManager: React.FC<Props> = ({ employees, setEmployees, onCl
   const [formData, setFormData] = useState({
     name: '', role: '', unit: UNITS[0], sector: SECTORS[0],
     cpf: '', positionNumber: '', categoryCode: '', shiftPattern: '', bankHoursBalance: '00:00',
-    shiftType: SHIFT_TYPES[0]
+    shiftType: ''
   });
 
   const handleChange = (field: string, value: string) => {
@@ -39,7 +40,7 @@ export const EmployeeManager: React.FC<Props> = ({ employees, setEmployees, onCl
     setFormData({
         name: '', role: '', unit: UNITS[0], sector: SECTORS[0],
         cpf: '', positionNumber: '', categoryCode: '', shiftPattern: '', bankHoursBalance: '00:00',
-        shiftType: SHIFT_TYPES[0]
+        shiftType: ''
     });
   };
 
@@ -94,6 +95,7 @@ export const EmployeeManager: React.FC<Props> = ({ employees, setEmployees, onCl
                      <div>
                          <label className="block text-[10px] font-bold text-slate-500 uppercase">Tipo de Turno</label>
                          <select className="w-full border-slate-300 rounded p-2 border bg-white text-sm" value={formData.shiftType} onChange={e => handleChange('shiftType', e.target.value)}>
+                            <option value="">Selecione</option>
                             {SHIFT_TYPES.map(s => <option key={s} value={s}>{s}</option>)}
                         </select>
                     </div>

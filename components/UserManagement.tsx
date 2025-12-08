@@ -31,9 +31,7 @@ export const UserManagement: React.FC<Props> = ({ onClose, availableUnits, emplo
 
   // Derive available sectors ONLY from the selected Allowed Units
   const availableSectors = useMemo(() => {
-      // If admin, or no units selected, return empty or all? Prompt says "only show sectors of allowed units"
       if (formData.allowedUnits.length === 0) return [];
-      
       const relevantEmployees = employees.filter(e => formData.allowedUnits.includes(e.unit));
       const sectors = new Set(relevantEmployees.map(e => e.sector));
       return Array.from(sectors).filter(Boolean).sort();
@@ -75,8 +73,7 @@ export const UserManagement: React.FC<Props> = ({ onClose, availableUnits, emplo
               allowedUnits: exists 
                 ? prev.allowedUnits.filter(u => u !== unit)
                 : [...prev.allowedUnits, unit],
-              // Optionally clear sectors if unit is removed?
-              allowedSectors: exists ? [] : prev.allowedSectors // Simplified: Clear sectors on unit change to force re-selection
+              allowedSectors: exists ? [] : prev.allowedSectors
           };
       });
   };
@@ -112,16 +109,16 @@ export const UserManagement: React.FC<Props> = ({ onClose, availableUnits, emplo
                 <h4 className="font-bold text-sm text-blue-900 uppercase mb-2">Novo Usuário</h4>
                 <div>
                     <label className="text-xs font-bold uppercase text-slate-500">Nome Completo</label>
-                    <input className="w-full border rounded p-1" value={formData.name} onChange={e => setFormData({...formData, name: e.target.value})} />
+                    <input className="w-full border rounded p-1" value={formData.name} onChange={e => setFormData({...formData, name: e.target.value})} onKeyDown={e => e.stopPropagation()} />
                 </div>
                 <div className="grid grid-cols-2 gap-2">
                     <div>
                         <label className="text-xs font-bold uppercase text-slate-500">Usuário</label>
-                        <input className="w-full border rounded p-1" value={formData.username} onChange={e => setFormData({...formData, username: e.target.value})} />
+                        <input className="w-full border rounded p-1" value={formData.username} onChange={e => setFormData({...formData, username: e.target.value})} onKeyDown={e => e.stopPropagation()} />
                     </div>
                     <div>
                         <label className="text-xs font-bold uppercase text-slate-500">Senha</label>
-                        <input className="w-full border rounded p-1" type="text" value={formData.password} onChange={e => setFormData({...formData, password: e.target.value})} />
+                        <input className="w-full border rounded p-1" type="text" value={formData.password} onChange={e => setFormData({...formData, password: e.target.value})} onKeyDown={e => e.stopPropagation()} />
                     </div>
                 </div>
                 

@@ -1,9 +1,9 @@
 
 import React, { useMemo, useState, useEffect, useRef } from 'react';
-import { Employee, Shift, MonthlySchedule, AIRulesConfig, StaffingConfig, GridSelection } from '../types';
+import { Employee, Shift, MonthlySchedule, AIRulesConfig, StaffingConfig, GridSelection, ExtendedColumnKey } from '../types';
 import { getDaysInMonth, validateSchedule } from '../services/schedulerService';
 import { Tooltip } from './Tooltip';
-import { HOLIDAYS } from '../constants';
+import { HOLIDAYS, COMMENTS_OPTIONS } from '../constants';
 
 interface Props {
   employees: Employee[];
@@ -13,6 +13,7 @@ interface Props {
   rules: AIRulesConfig;
   staffingConfig: StaffingConfig; 
   onReorderEmployees?: (draggedId: string, targetId: string) => void;
+  onUpdateEmployee?: (id: string, field: string, value: string) => void;
   isReadOnly?: boolean;
   onUndo?: () => void;
   onRedo?: () => void;
@@ -28,9 +29,8 @@ interface ContextMenuState {
   columnKey?: string;
   assignmentType?: 'absence' | 'leave' | 'other';
   hasAttachment?: boolean;
+  isCommentMenu?: boolean;
 }
-
-type ExtendedColumnKey = 'name' | 'id' | 'role' | 'cpf' | 'scale' | 'time' | 'position' | 'council' | 'bh' | 'uf';
 
 interface DailyStat {
   day: number;
@@ -41,13 +41,14 @@ interface DailyStat {
 
 export const RosterGrid: React.FC<Props> = ({ 
     employees, shifts, currentSchedule, setSchedule, rules, staffingConfig, 
-    onReorderEmployees, isReadOnly = false, onUndo, onRedo 
+    onReorderEmployees, onUpdateEmployee, isReadOnly = false, onUndo, onRedo 
 }) => {
   const [contextMenu, setContextMenu] = useState<ContextMenuState>({ visible: false, type: 'cell', x: 0, y: 0 });
   const menuRef = useRef<HTMLDivElement>(null);
   
   const gridContainerRef = useRef<HTMLDivElement>(null);
   const internalClipboard = useRef<string | null>(null);
+  const footerScrollRef = useRef<HTMLDivElement>(null);
 
   // Attachment Refs
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -57,11 +58,12 @@ export const RosterGrid: React.FC<Props> = ({
   const [sortConfig, setSortConfig] = useState<{ key: ExtendedColumnKey | null, direction: 'asc' | 'desc' }>({ key: null, direction: 'asc' });
   const [hiddenColumns, setHiddenColumns] = useState<ExtendedColumnKey[]>([]);
   
-  const [frozenColumns, setFrozenColumns] = useState<ExtendedColumnKey[]>([]);
+  // Initialize frozen columns with 'name' by default so it stays sticky, others scroll
+  const [frozenColumns, setFrozenColumns] = useState<ExtendedColumnKey[]>(['name']);
 
   // RESIZING STATE
   const [colWidths, setColWidths] = useState<Record<ExtendedColumnKey, number>>({
-      name: 220, id: 80, role: 120, cpf: 100, scale: 60, time: 80, position: 80, council: 100, bh: 60, uf: 90
+      name: 220, id: 80, role: 120, cpf: 100, scale: 60, time: 80, shiftType: 100, position: 80, council: 100, bh: 60, uf: 90
   });
   const [resizing, setResizing] = useState<{ key: ExtendedColumnKey, startX: number, startWidth: number } | null>(null);
 
@@ -91,6 +93,7 @@ export const RosterGrid: React.FC<Props> = ({
             case 'cpf': valA = a.cpf; valB = b.cpf; break;
             case 'scale': valA = a.shiftPattern; valB = b.shiftPattern; break;
             case 'time': valA = a.workTime || ''; valB = b.workTime || ''; break;
+            case 'shiftType': valA = a.shiftType || ''; valB = b.shiftType || ''; break;
             case 'position': valA = a.positionNumber; valB = b.positionNumber; break;
             case 'council': valA = a.categoryCode; valB = b.categoryCode; break;
             case 'bh': valA = a.bankHoursBalance; valB = b.bankHoursBalance; break;
@@ -109,10 +112,45 @@ export const RosterGrid: React.FC<Props> = ({
       let offset = 0;
       for (const k of visibleColumns) {
           if (k === key) break;
-          offset += colWidths[k];
+          // Only accumulate offset for PREVIOUS frozen columns to stack them
+          if (frozenColumns.includes(k)) {
+             offset += colWidths[k];
+          }
       }
       return offset;
   };
+  
+  const getStickyLeft = (key: ExtendedColumnKey) => {
+      let offset = 0;
+      for (const k of visibleColumns) {
+          if (k === key) break;
+          if (frozenColumns.includes(k)) {
+              offset += colWidths[k];
+          }
+      }
+      return offset;
+  }
+
+  // --- CLICK OUTSIDE TO CLEAR SELECTION & CLOSE MENU ---
+  useEffect(() => {
+    const handleBackgroundClick = (e: MouseEvent) => {
+      // Check if click is inside grid container but NOT on a cell/row (or outside completely)
+      if (gridContainerRef.current && gridContainerRef.current.contains(e.target as Node)) {
+          const target = e.target as HTMLElement;
+          if (target === gridContainerRef.current || target.classList.contains('roster-bg')) {
+             setSelection(null);
+             setFocusedCell(null);
+             setContextMenu(prev => ({...prev, visible: false})); // Close Menu
+          }
+      } else {
+          // If clicked outside grid entirely
+          setContextMenu(prev => ({...prev, visible: false}));
+      }
+    };
+    document.addEventListener('mousedown', handleBackgroundClick);
+    return () => document.removeEventListener('mousedown', handleBackgroundClick);
+  }, []);
+
 
   // --- RESIZING LOGIC ---
   useEffect(() => {
@@ -157,6 +195,7 @@ export const RosterGrid: React.FC<Props> = ({
     setIsSelecting(true);
     setSelection({ startRow: rowIndex, startCol: day, endRow: rowIndex, endCol: day });
     setFocusedCell({ empIndex: rowIndex, day });
+    setContextMenu(prev => ({...prev, visible: false}));
   };
 
   const handleMouseEnter = (rowIndex: number, day: number) => {
@@ -176,7 +215,6 @@ export const RosterGrid: React.FC<Props> = ({
         if (['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(e.key)) {
             e.preventDefault();
             if (!focusedCell) {
-                // Default to top-left if nothing focused
                 setFocusedCell({ empIndex: 0, day: 1 });
                 setSelection({ startRow: 0, startCol: 1, endRow: 0, endCol: 1 });
                 return;
@@ -190,7 +228,6 @@ export const RosterGrid: React.FC<Props> = ({
             if (e.key === 'ArrowRight') day = Math.min(daysInMonth, day + 1);
 
             setFocusedCell({ empIndex, day });
-            // If Shift is pressed, expand selection. If not, reset selection to single cell.
             if (e.shiftKey && selection) {
                  setSelection({ ...selection, endRow: empIndex, endCol: day });
             } else {
@@ -214,20 +251,29 @@ export const RosterGrid: React.FC<Props> = ({
             const maxC = Math.max(selection.startCol, selection.endCol);
 
             const newAssignments = { ...currentSchedule.assignments };
+            const newAttachments = { ...currentSchedule.attachments };
+            const newComments = { ...currentSchedule.comments };
+            
             let changed = false;
             for (let r = minR; r <= maxR; r++) {
                 const emp = sortedEmployees[r];
                 if (!emp) continue;
+                const dateKeys = [];
+                for (let c = minC; c <= maxC; c++) {
+                    dateKeys.push(`${currentSchedule.year}-${String(currentSchedule.month + 1).padStart(2, '0')}-${String(c).padStart(2, '0')}`);
+                }
+                
                 if (newAssignments[emp.id]) {
-                    const empSchedule = { ...newAssignments[emp.id] };
-                    for (let c = minC; c <= maxC; c++) {
-                        const dateKey = `${currentSchedule.year}-${String(currentSchedule.month + 1).padStart(2, '0')}-${String(c).padStart(2, '0')}`;
-                        if (empSchedule[dateKey]) { delete empSchedule[dateKey]; changed = true; }
-                    }
-                    newAssignments[emp.id] = empSchedule;
+                    dateKeys.forEach(k => { if(newAssignments[emp.id][k]) { delete newAssignments[emp.id][k]; changed = true; }});
+                }
+                if (newAttachments[emp.id]) {
+                     dateKeys.forEach(k => { if(newAttachments[emp.id][k]) { delete newAttachments[emp.id][k]; changed = true; }});
+                }
+                 if (newComments[emp.id]) {
+                     dateKeys.forEach(k => { if(newComments[emp.id][k]) { delete newComments[emp.id][k]; changed = true; }});
                 }
             }
-            if (changed) setSchedule(prev => ({ ...prev, assignments: newAssignments }));
+            if (changed) setSchedule(prev => ({ ...prev, assignments: newAssignments, attachments: newAttachments, comments: newComments }));
         }
 
         // COPY
@@ -294,6 +340,7 @@ export const RosterGrid: React.FC<Props> = ({
           employees.forEach(emp => {
               const shiftId = currentSchedule.assignments[emp.id]?.[dateKey];
               const shift = shifts.find(s => s.id === shiftId);
+              // Count if explicitly Work OR if Empty (undefined)
               const isWork = !shift || (shift.category !== 'dayoff' && shift.category !== 'absence' && shift.category !== 'leave');
               if (isWork) {
                   totalActive++;
@@ -333,7 +380,7 @@ export const RosterGrid: React.FC<Props> = ({
 
       const hasAttachment = !!currentSchedule.attachments?.[employeeId]?.[dateKey];
 
-      setContextMenu({ visible: true, type: 'cell', x: e.pageX, y: e.pageY, employeeId, day, assignmentType, hasAttachment });
+      setContextMenu({ visible: true, type: 'cell', x: e.pageX, y: e.pageY, employeeId, day, assignmentType, hasAttachment, isCommentMenu: false });
   };
 
   const handleHeaderContextMenu = (e: React.MouseEvent, key: ExtendedColumnKey) => {
@@ -348,6 +395,23 @@ export const RosterGrid: React.FC<Props> = ({
       }
       setContextMenu(prev => ({...prev, visible: false}));
   };
+  
+  const handleAddComment = (comment: string) => {
+      if (contextMenu.employeeId && contextMenu.day) {
+          const dateKey = `${currentSchedule.year}-${String(currentSchedule.month + 1).padStart(2, '0')}-${String(contextMenu.day).padStart(2, '0')}`;
+          setSchedule(prev => ({
+              ...prev,
+              comments: {
+                  ...prev.comments,
+                  [contextMenu.employeeId!]: {
+                      ...(prev.comments?.[contextMenu.employeeId!] || {}),
+                      [dateKey]: comment
+                  }
+              }
+          }));
+      }
+      setContextMenu(prev => ({...prev, visible: false, isCommentMenu: false}));
+  }
 
   const handleDownloadAttachment = () => {
      if(contextMenu.employeeId && contextMenu.day) {
@@ -408,14 +472,18 @@ export const RosterGrid: React.FC<Props> = ({
           const dateKey = `${currentSchedule.year}-${String(currentSchedule.month + 1).padStart(2, '0')}-${String(contextMenu.day).padStart(2, '0')}`;
           const newAssignments = { ...(currentSchedule.assignments[contextMenu.employeeId!] || {}) };
           delete newAssignments[dateKey];
-          // Also clear attachment if any
+          // Clear attachment
           const newAttachments = { ...(currentSchedule.attachments?.[contextMenu.employeeId!] || {}) };
           if(newAttachments[dateKey]) delete newAttachments[dateKey];
+          // Clear comment
+          const newComments = { ...(currentSchedule.comments?.[contextMenu.employeeId!] || {}) };
+          if(newComments[dateKey]) delete newComments[dateKey];
           
           setSchedule(prev => ({ 
               ...prev, 
               assignments: { ...prev.assignments, [contextMenu.employeeId!]: newAssignments },
-              attachments: { ...prev.attachments, [contextMenu.employeeId!]: newAttachments }
+              attachments: { ...prev.attachments, [contextMenu.employeeId!]: newAttachments },
+              comments: { ...prev.comments, [contextMenu.employeeId!]: newComments }
           }));
        }
        setContextMenu(prev => ({ ...prev, visible: false }));
@@ -427,11 +495,11 @@ export const RosterGrid: React.FC<Props> = ({
 
   const labelMap: Record<ExtendedColumnKey, string> = { 
       name: 'NOME COLABORADOR', id: 'ID', role: 'CARGO', cpf: 'CPF', 
-      scale: 'ESCALA', time: 'HORÁRIO', position: 'Nº POSIÇÃO', council: 'REG. CONSELHO', bh: 'BH', uf: 'UF' 
+      scale: 'ESCALA', time: 'HORÁRIO', shiftType: 'TURNO', position: 'Nº POSIÇÃO', council: 'REG. CONSELHO', bh: 'BH', uf: 'UF' 
   };
 
   return (
-    <div ref={gridContainerRef} className="bg-white rounded shadow-sm border border-slate-300 flex flex-col h-full w-full overflow-auto select-none relative print:border-none print:shadow-none" onMouseUp={handleMouseUp}>
+    <div ref={gridContainerRef} className="roster-bg bg-white rounded shadow-sm border border-slate-300 flex flex-col h-full w-full overflow-auto select-none relative print:border-none print:shadow-none" onMouseUp={handleMouseUp}>
       {hiddenColumns.length > 0 && (<button onClick={() => setHiddenColumns([])} className="absolute top-1 left-1 z-50 bg-blue-100 text-blue-700 p-1 rounded text-xs print:hidden">Restaurar Colunas</button>)}
       
       {/* Hidden File Input for Attachments */}
@@ -444,11 +512,18 @@ export const RosterGrid: React.FC<Props> = ({
       />
 
       {contextMenu.visible && (
-          <div ref={menuRef} className="fixed z-[100] bg-white shadow-xl rounded-lg border border-slate-200 py-1 min-w-[160px]" style={{ top: contextMenu.y, left: contextMenu.x }}>
+          <div ref={menuRef} className="fixed z-[100] bg-white shadow-xl rounded-lg border border-slate-200 py-1 min-w-[180px]" style={{ top: contextMenu.y, left: contextMenu.x }}>
               {contextMenu.type === 'header' ? (
                   <>
                     <button onClick={() => { if(contextMenu.columnKey) { setFrozenColumns(prev => prev.includes(contextMenu.columnKey as any) ? prev.filter(k=>k!==contextMenu.columnKey) : [...prev, contextMenu.columnKey as any]); setContextMenu(prev=>({...prev, visible:false})); }}} className="w-full text-left px-4 py-2 hover:bg-slate-50 text-xs font-bold text-slate-700">Congelar/Descongelar</button>
                     <button onClick={() => { if(contextMenu.columnKey) setHiddenColumns(prev => [...prev, contextMenu.columnKey as ExtendedColumnKey]); setContextMenu(prev => ({...prev, visible:false}))}} className="w-full text-left px-4 py-2 hover:bg-slate-50 text-xs text-red-600 font-bold border-t">Ocultar Coluna</button>
+                  </>
+              ) : contextMenu.isCommentMenu ? (
+                  <>
+                      <button onClick={() => setContextMenu(prev => ({...prev, isCommentMenu: false}))} className="w-full text-left px-4 py-2 hover:bg-slate-50 text-xs text-slate-500 border-b">◄ Voltar</button>
+                      {COMMENTS_OPTIONS.map(opt => (
+                           <button key={opt} onClick={() => handleAddComment(opt)} className="w-full text-left px-4 py-2 hover:bg-blue-50 text-xs font-bold text-slate-700">{opt}</button>
+                      ))}
                   </>
               ) : (
                   <>
@@ -458,6 +533,7 @@ export const RosterGrid: React.FC<Props> = ({
                     {contextMenu.hasAttachment && (
                         <button onClick={handleDownloadAttachment} className="w-full text-left px-4 py-2 hover:bg-green-50 text-xs font-bold text-green-700 border-b flex items-center gap-2">📥 Baixar Anexo</button>
                     )}
+                    <button onClick={() => setContextMenu(prev => ({...prev, isCommentMenu: true}))} className="w-full text-left px-4 py-2 hover:bg-orange-50 text-xs font-bold text-orange-700 border-b flex items-center gap-2">💬 Adicionar Observação</button>
                     <button onClick={handleClearCell} className="w-full text-left px-4 py-2 hover:bg-red-50 text-xs text-red-600 font-bold border-b">Limpar</button>
                     <div className="max-h-60 overflow-y-auto">
                         {shifts.map(shift => (
@@ -474,10 +550,10 @@ export const RosterGrid: React.FC<Props> = ({
 
       {/* HEADER */}
       <div className="flex bg-company-blue text-white z-40 shadow-md w-fit sticky top-0">
-        <div className="flex-shrink-0 flex border-r border-blue-800 bg-company-blue z-40 sticky left-0">
+        <div className="flex-shrink-0 flex border-r border-blue-800 bg-company-blue z-40">
             {visibleColumns.map((key) => {
                 const isFrozen = frozenColumns.includes(key);
-                const left = getColumnLeftOffset(key);
+                const left = getStickyLeft(key);
                 return (
                 <div key={key} style={{ width: colWidths[key], position: isFrozen ? 'sticky' : 'relative', left: isFrozen ? left : 'auto', zIndex: isFrozen ? 50 : 'auto' }} onClick={() => setSortConfig(prev => ({ key, direction: prev.key === key && prev.direction === 'asc' ? 'desc' : 'asc' }))} onContextMenu={(e) => handleHeaderContextMenu(e, key)} className={`relative p-2 font-bold text-[10px] border-r border-blue-800 flex items-center justify-center overflow-hidden whitespace-nowrap cursor-pointer hover:bg-blue-900 group ${isFrozen ? 'bg-company-blue shadow-[2px_0_5px_rgba(0,0,0,0.2)]' : ''}`}>
                     {labelMap[key]} {sortConfig.key === key && <span className="ml-1 text-[8px]">{sortConfig.direction === 'asc' ? '▲' : '▼'}</span>}
@@ -513,21 +589,43 @@ export const RosterGrid: React.FC<Props> = ({
         return (
             <div key={employee.id} className="flex border-b border-slate-300 bg-white hover:bg-blue-50 transition-colors group h-9">
                 {/* Left Cols */}
-                <div draggable={!isReadOnly} onDragStart={(e) => handleDragStart(e, employee.id)} onDrop={(e) => handleDrop(e, employee.id)} className="flex-shrink-0 flex border-r border-slate-300 bg-white z-10 group-hover:bg-blue-50 cursor-move sticky left-0">
+                <div draggable={!isReadOnly} onDragStart={(e) => handleDragStart(e, employee.id)} onDrop={(e) => handleDrop(e, employee.id)} className="flex-shrink-0 flex border-r border-slate-300 bg-white z-10 group-hover:bg-blue-50 cursor-move">
                     {visibleColumns.map(key => {
                         let val = key === 'scale' ? employee.shiftPattern : key === 'time' ? employee.workTime : key === 'position' ? employee.positionNumber : key === 'council' ? employee.categoryCode : key === 'bh' ? employee.bankHoursBalance : key === 'uf' ? employee.lastDayOff : (employee as any)[key];
                         
-                        // Format Date for UF
-                        if (key === 'uf' && val) {
-                            const parts = val.split('-');
-                            if (parts.length === 3) val = `${parts[2]}/${parts[1]}`;
+                        // Format Date for UF (DD/MM)
+                        if (key === 'uf') {
+                            if (val) {
+                                const parts = val.split('-');
+                                if (parts.length === 3) val = `${parts[2]}/${parts[1]}`;
+                            } else {
+                                val = '-';
+                            }
                         }
 
                         const colorClass = key === 'bh' ? (val && val.startsWith('-') ? 'text-red-600' : 'text-green-600 font-bold') : 'text-slate-500';
-                        const isFrozen = frozenColumns.includes(key); const left = getColumnLeftOffset(key);
+                        const isFrozen = frozenColumns.includes(key); const left = getStickyLeft(key);
+                        const isShiftType = key === 'shiftType';
+
                         return (
                             <div key={key} style={{ width: colWidths[key], position: isFrozen ? 'sticky' : 'relative', left: isFrozen ? left : 'auto', zIndex: isFrozen ? 30 : 'auto' }} className={`flex items-center px-2 border-r border-slate-100 overflow-hidden bg-white group-hover:bg-blue-50 ${isFrozen ? 'shadow-[2px_0_5px_rgba(0,0,0,0.05)]' : ''}`}>
-                                <span className={`text-[9px] truncate uppercase font-medium ${colorClass}`} title={val}>{val}</span>
+                                {isShiftType && !isReadOnly ? (
+                                    <input 
+                                        type="text"
+                                        className="w-full bg-transparent border-none text-[9px] uppercase font-medium focus:ring-1 focus:ring-blue-500 rounded px-1 min-w-0"
+                                        defaultValue={val}
+                                        onBlur={(e) => {
+                                            if (onUpdateEmployee && e.target.value !== val) {
+                                                onUpdateEmployee(employee.id, 'shiftType', e.target.value);
+                                            }
+                                        }}
+                                        onKeyDown={(e) => {
+                                            if (e.key === 'Enter') e.currentTarget.blur();
+                                        }}
+                                    />
+                                ) : (
+                                    <span className={`text-[9px] truncate uppercase font-medium ${colorClass}`} title={val}>{val}</span>
+                                )}
                             </div>
                         )
                     })}
@@ -541,6 +639,7 @@ export const RosterGrid: React.FC<Props> = ({
                         const isOff = isWeekendOrHoliday(day);
                         const selected = isSelected(rowIndex, day);
                         const attachment = currentSchedule.attachments?.[employee.id]?.[dateKey];
+                        const comment = currentSchedule.comments?.[employee.id]?.[dateKey];
 
                         return (
                             <div key={day} onMouseDown={() => handleMouseDown(rowIndex, day)} onMouseEnter={() => handleMouseEnter(rowIndex, day)} onContextMenu={(e) => handleCellContextMenu(e, employee.id, day)}
@@ -550,6 +649,7 @@ export const RosterGrid: React.FC<Props> = ({
                                 `}>
                                 {shift ? shift.code : ''}
                                 {attachment && <Tooltip content={`Anexo: ${attachment.name}`}><span className="absolute top-0 right-0 text-[8px] cursor-help">📎</span></Tooltip>}
+                                {comment && <Tooltip content={`Obs: ${comment}`}><span className="absolute bottom-0 right-0 w-0 h-0 border-l-[6px] border-l-transparent border-b-[6px] border-b-orange-500"></span></Tooltip>}
                             </div>
                         );
                     })}
@@ -564,7 +664,7 @@ export const RosterGrid: React.FC<Props> = ({
       </div>
       
       {/* FOOTER */}
-      <div className="bg-slate-50 border-t border-slate-300 shadow-inner flex shrink-0 print:hidden w-fit sticky bottom-0 z-40">
+      <div className="bg-slate-50 border-t border-slate-300 shadow-inner flex shrink-0 print:hidden w-fit sticky bottom-0 z-40" ref={footerScrollRef}>
           <div className="flex h-10 border-b border-slate-200 w-full">
              <div className="flex-shrink-0 flex items-center justify-end px-2 font-bold text-[10px] text-slate-700 uppercase bg-slate-100 border-r border-slate-300 sticky left-0 z-40" style={{ width: totalLeftWidth }}>Total Ativos / Ideal</div>
              <div className="flex min-w-max"> 

@@ -38,9 +38,9 @@ export const EmployeeDatabaseScreen: React.FC<Props> = ({ employees, setEmployee
       setEditingId('NEW');
       setFormData({
           id: Date.now().toString(),
-          name: '', role: '', unit: units[0], sector: sectors[0], shiftType: shiftTypes[0],
+          name: '', role: '', unit: units[0], sector: sectors[0], shiftType: '',
           contractType: 'CLT', cpf: '', positionNumber: '', categoryCode: '', shiftPattern: '5X2', bankHoursBalance: '00:00',
-          organizationalUnit: '', birthDate: '', admissionDate: '', email: '', gender: '', workTime: '', lastDayOff: ''
+          organizationalUnit: '', birthDate: '', admissionDate: '', email: '', gender: '', workTime: '', lastDayOff: '', terminationDate: ''
       });
   };
 
@@ -114,6 +114,7 @@ export const EmployeeDatabaseScreen: React.FC<Props> = ({ employees, setEmployee
              <div>
                 <label className="text-[10px] font-bold uppercase text-slate-500">Turno</label>
                 <select className="w-full border rounded p-2 text-sm bg-white" value={formData.shiftType || ''} onChange={e => setFormData({...formData, shiftType: e.target.value})}>
+                    <option value="">Selecione</option>
                     {shiftTypes.map(s => <option key={s} value={s}>{s}</option>)}
                 </select>
              </div>
@@ -167,9 +168,15 @@ export const EmployeeDatabaseScreen: React.FC<Props> = ({ employees, setEmployee
                     <input className="w-full border rounded p-2 text-sm uppercase" value={formData.positionNumber || ''} onChange={e => setFormData({...formData, positionNumber: e.target.value})} />
                  </div>
              </div>
-             <div>
-                <label className="text-[10px] font-bold uppercase text-slate-500">UF (Última Folga)</label>
-                <input className="w-full border rounded p-2 text-sm" type="date" value={formData.lastDayOff || ''} onChange={e => setFormData({...formData, lastDayOff: e.target.value})} />
+             <div className="grid grid-cols-2 gap-2">
+                 <div>
+                    <label className="text-[10px] font-bold uppercase text-slate-500">UF (Última Folga)</label>
+                    <input className="w-full border rounded p-2 text-sm" type="date" value={formData.lastDayOff || ''} onChange={e => setFormData({...formData, lastDayOff: e.target.value})} />
+                 </div>
+                 <div>
+                    <label className="text-[10px] font-bold uppercase text-red-500">Data Desligamento</label>
+                    <input className="w-full border rounded p-2 text-sm border-red-200" type="date" value={formData.terminationDate || ''} onChange={e => setFormData({...formData, terminationDate: e.target.value})} />
+                 </div>
              </div>
              <div>
                 <label className="text-[10px] font-bold uppercase text-slate-500">Cod. Categoria</label>
@@ -249,6 +256,7 @@ export const EmployeeDatabaseScreen: React.FC<Props> = ({ employees, setEmployee
                                       <div className="text-[10px] text-slate-600 mb-0.5">{emp.workTime}</div>
                                       <div className="text-[10px] text-green-600 font-bold">BH: {emp.bankHoursBalance}</div>
                                       <div className="text-[9px] text-slate-400 mt-1">UF: {emp.lastDayOff || '-'}</div>
+                                      {emp.terminationDate && <div className="text-[9px] text-red-500 font-bold mt-1">Deslig: {emp.terminationDate}</div>}
                                   </td>
                                   <td className="p-3 text-right">
                                       <button onClick={() => handleEdit(emp)} className="text-blue-600 hover:text-blue-800 mr-3 font-bold text-xs uppercase">Editar</button>

@@ -1,5 +1,5 @@
 
-import React, { useState, useMemo, useEffect, useCallback } from 'react';
+import React, { useState, useMemo, useEffect, useCallback, useRef } from 'react';
 import { INITIAL_EMPLOYEES, INITIAL_SHIFTS, MONTH_NAMES, INITIAL_UNITS, INITIAL_SECTORS, INITIAL_SHIFT_TYPES } from './constants';
 import { Employee, MonthlySchedule, Shift, AIRulesConfig, StaffingConfig, User } from './types';
 import { EmployeeManager } from './components/EmployeeManager';
@@ -25,7 +25,8 @@ const SaveIcon = ({ saved }: { saved: boolean }) => (
 );
 const PrintIcon = () => <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-5 h-5"><path strokeLinecap="round" strokeLinejoin="round" d="M6.72 13.829c-.24.03-.48.062-.72.096m.72-.096a42.415 42.415 0 0110.56 0m-10.56 0L6.34 18m10.94-4.171c.24.03.48.062.72.096m-.72-.096L17.66 18m0 0l.229 2.523a1.125 1.125 0 01-1.12 1.227H7.231c-.662 0-1.18-.568-1.12-1.227L6.34 18m11.318 0h1.091A2.25 2.25 0 0021 15.75V9.456c0-1.081-.768-2.015-1.837-2.175a48.055 48.055 0 00-1.913-.247M6.34 18H5.25A2.25 2.25 0 013 15.75V9.456c0-1.081.768-2.015 1.837-2.175a48.041 48.041 0 011.913-.247m10.5 0a48.536 48.536 0 00-10.5 0m10.5 0V3.375c0-.621-.504-1.125-1.125-1.125h-8.25c-.621 0-1.125.504-1.125 1.125v3.659M18 10.5h.008v.008H18V10.5zm-3 0h.008v.008H15V10.5z" /></svg>;
 const TagIcon = () => <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-5 h-5"><path strokeLinecap="round" strokeLinejoin="round" d="M9.568 3H5.25A2.25 2.25 0 003 5.25v4.318c0 .597.237 1.17.659 1.591l9.581 9.581c.699.699 1.78.872 2.607.33a18.095 18.095 0 005.223-5.223c.542-.827.369-1.908-.33-2.607L11.16 3.66A2.25 2.25 0 009.568 3z" /><path strokeLinecap="round" strokeLinejoin="round" d="M6 6h.008v.008H6V6z" /></svg>;
-const ScaleIcon = () => <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-5 h-5"><path strokeLinecap="round" strokeLinejoin="round" d="M10.34 15.84c-.688-.06-1.386-.09-2.09-.09H7.5a4.5 4.5 0 110-9h.75c.704 0 1.402-.03 2.09-.09m0 9.18c.253.962.584 1.892.985 2.783.247.55.06 1.21-.463 1.511l-.657.38c-.551.318-1.26.117-1.527-.461a20.845 20.845 0 01-1.44-4.282m3.102.069a18.03 18.03 0 01-.59-4.59c0-1.586.205-3.124.59-4.59m0 9.18a23.848 23.848 0 018.835 2.535M10.34 6.66a23.847 23.847 0 008.835-2.535m0 0A23.74 23.74 0 0018.795 3m.38 1.125a23.91 23.91 0 011.014 5.395m-1.014 8.855c-.118.38-.245.754-.38 1.125m.38-1.125a23.91 23.91 0 001.014-5.395m0-3.46c.495.413.811 1.035.811 1.73 0 .695-.316 1.317-.811 1.73m0-3.46a24.347 24.347 0 010 3.46" /></svg>;
+// Megaphone Icon (Regras da IA)
+const MegaphoneIcon = () => <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-5 h-5"><path strokeLinecap="round" strokeLinejoin="round" d="M10.34 15.84c-.688-.06-1.386-.09-2.09-.09H7.5a4.5 4.5 0 110-9h.75c.704 0 1.402-.03 2.09-.09m0 9.18c.253.962.584 1.892.985 2.783.247.55.06 1.21-.463 1.511l-.657.38c-.551.318-1.26.117-1.527-.461a20.845 20.845 0 01-1.44-4.282m3.102.069a18.03 18.03 0 01-.59-4.59c0-1.586.205-3.124.59-4.59m0 9.18a23.848 23.848 0 018.835 2.535M10.34 6.66a23.847 23.847 0 018.835-2.535m0 0A23.74 23.74 0 0018.795 3m.38 1.125a23.91 23.91 0 011.014 5.395m-1.014 8.855c-.118.38-.245.754-.38 1.125m.38-1.125a23.91 23.91 0 001.014-5.395m0-3.467a23.879 23.879 0 00-1.014-5.395m0 3.467c-.291 1.126-.541 2.274-.75 3.446M12.5 12h.008v.008H12.5V12z" /></svg>;
 const ChartBarIcon = () => <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-5 h-5"><path strokeLinecap="round" strokeLinejoin="round" d="M3 13.125C3 12.504 3.504 12 4.125 12h2.25c.621 0 1.125.504 1.125 1.125v6.75C7.5 20.496 6.996 21 6.375 21h-2.25A1.125 1.125 0 013 19.875v-6.75zM9.75 8.625c0-.621.504-1.125 1.125-1.125h2.25c.621 0 1.125.504 1.125 1.125v11.25c0 .621-.504 1.125-1.125 1.125h-2.25a1.125 1.125 0 01-1.125-1.125V8.625zM16.5 4.125c0-.621.504-1.125 1.125-1.125h2.25C20.496 3 21 3.504 21 4.125v15.75c0 .621-.504 1.125-1.125 1.125h-2.25a1.125 1.125 0 01-1.125-1.125V4.125z" /></svg>;
 
 const App: React.FC = () => {
@@ -45,12 +46,13 @@ const App: React.FC = () => {
   const [selectedUnits, setSelectedUnits] = useState<string[]>([]);
   const [selectedSectors, setSelectedSectors] = useState<string[]>([]);
   const [selectedShiftTypes, setSelectedShiftTypes] = useState<string[]>([]);
+  const [globalSearchTerm, setGlobalSearchTerm] = useState('');
 
   const [aiRules, setAiRules] = useState<AIRulesConfig>({ maxConsecutiveDays: 6, minRestHours: 11, preferSundayOff: true, sundayOffFrequency: 2, preferConsecutiveDaysOff: true });
   const [staffingConfig, setStaffingConfig] = useState<StaffingConfig>({});
   
   // SCHEDULE STATE
-  const [schedule, setScheduleState] = useState<MonthlySchedule>({ month: currentDate.getMonth(), year: currentDate.getFullYear(), assignments: {}, attachments: {} });
+  const [schedule, setScheduleState] = useState<MonthlySchedule>({ month: currentDate.getMonth(), year: currentDate.getFullYear(), assignments: {}, attachments: {}, comments: {} });
   const [historyPast, setHistoryPast] = useState<MonthlySchedule[]>([]);
   const [historyFuture, setHistoryFuture] = useState<MonthlySchedule[]>([]);
 
@@ -94,6 +96,9 @@ const App: React.FC = () => {
   const [showUserMgmt, setShowUserMgmt] = useState(false);
   const [filterManager, setFilterManager] = useState<{ isOpen: boolean, type: 'Unit' | 'Sector' | 'Shift' | null }>({ isOpen: false, type: null });
 
+  // Refs for click outside
+  const appContainerRef = useRef<HTMLDivElement>(null);
+
   // Load Data
   useEffect(() => {
     const session = localStorage.getItem('CURRENT_SESSION');
@@ -126,6 +131,10 @@ const App: React.FC = () => {
       setTimeout(() => setIsSaved(false), 2000);
   };
 
+  const handleUpdateEmployee = (id: string, field: string, value: string) => {
+      setEmployees(prev => prev.map(e => e.id === id ? { ...e, [field]: value } : e));
+  };
+
   // Sync Lists
   useEffect(() => {
       const newUnits = new Set(units);
@@ -140,23 +149,68 @@ const App: React.FC = () => {
       if(changed) { setUnits(Array.from(newUnits).sort()); setSectors(Array.from(newSectors).sort()); setShiftTypesList(Array.from(newTypes).sort()); }
   }, [employees]);
 
-  // Derived Active Lists for Filters
-  const activeUnits = useMemo(() => Array.from(new Set(employees.map(e => e.unit).filter(Boolean))).sort(), [employees]);
-  const activeSectors = useMemo(() => Array.from(new Set(employees.map(e => e.sector).filter(Boolean))).sort(), [employees]);
-  const activeShiftTypes = useMemo(() => Array.from(new Set(employees.map(e => e.shiftType).filter(Boolean))).sort(), [employees]);
+  // --- DERIVED LISTS FOR FILTERS (Restricted by User Permissions) ---
+  const availableEmployees = useMemo(() => {
+      // First, filter all employees to only those the user is allowed to see based on UNITS
+      if (currentUser?.role !== 'admin' && currentUser?.allowedUnits && currentUser.allowedUnits.length > 0) {
+          return employees.filter(e => currentUser.allowedUnits!.includes(e.unit));
+      }
+      return employees;
+  }, [employees, currentUser]);
 
+  const activeUnits = useMemo(() => {
+      const rawUnits = Array.from(new Set(availableEmployees.map(e => e.unit).filter(Boolean))).sort();
+      return rawUnits;
+  }, [availableEmployees]);
+
+  const activeSectors = useMemo(() => {
+      // Get sectors present in the AVAILABLE employees
+      let rawSectors = Array.from(new Set(availableEmployees.map(e => e.sector).filter(Boolean))).sort();
+      
+      // Further restrict if the user has specific allowed sectors defined
+      if (currentUser?.role !== 'admin' && currentUser?.allowedSectors && currentUser.allowedSectors.length > 0) {
+          rawSectors = rawSectors.filter(s => currentUser.allowedSectors!.includes(s));
+      }
+      return rawSectors;
+  }, [availableEmployees, currentUser]);
+
+  const activeShiftTypes = useMemo(() => {
+      return Array.from(new Set(availableEmployees.map(e => e.shiftType).filter(Boolean))).sort();
+  }, [availableEmployees]);
+
+
+  // --- MAIN TABLE FILTERING ---
   const filteredEmployees = useMemo(() => {
-      return employees.filter(emp => {
-        if (currentUser?.role !== 'admin') {
-            if (currentUser?.allowedUnits && currentUser.allowedUnits.length > 0) { if (!currentUser.allowedUnits.includes(emp.unit)) return false; }
-            if (currentUser?.allowedSectors && currentUser.allowedSectors.length > 0) { if (!currentUser.allowedSectors.includes(emp.sector)) return false; }
+      return availableEmployees.filter(emp => {
+        // Sector Permission Check (Granular)
+        if (currentUser?.role !== 'admin' && currentUser?.allowedSectors && currentUser.allowedSectors.length > 0) {
+            if (!currentUser.allowedSectors.includes(emp.sector)) return false;
         }
+
+        // Search Bar Check
+        if (globalSearchTerm) {
+            const term = globalSearchTerm.toLowerCase();
+            const match = emp.name.toLowerCase().includes(term) || emp.id.includes(term) || emp.role.toLowerCase().includes(term);
+            if (!match) return false;
+        }
+
+        // Termination Check
+        if (emp.terminationDate) {
+            const termDate = new Date(emp.terminationDate);
+            const scheduleDateStart = new Date(schedule.year, schedule.month, 1);
+            const termDateEnd = new Date(termDate.getFullYear(), termDate.getMonth() + 1, 0); 
+            
+            if (scheduleDateStart > termDateEnd) {
+                return false; 
+            }
+        }
+
         const matchUnit = selectedUnits.length === 0 || selectedUnits.includes(emp.unit);
         const matchSector = selectedSectors.length === 0 || selectedSectors.includes(emp.sector);
         const matchShift = selectedShiftTypes.length === 0 || selectedShiftTypes.includes(emp.shiftType);
         return matchUnit && matchSector && matchShift;
       });
-  }, [employees, selectedUnits, selectedSectors, selectedShiftTypes, currentUser]);
+  }, [availableEmployees, selectedUnits, selectedSectors, selectedShiftTypes, currentUser, globalSearchTerm, schedule.year, schedule.month]);
 
   const handleMonthChange = (offset: number) => {
     const newDate = new Date(currentDate.getFullYear(), currentDate.getMonth() + offset, 1);
@@ -178,6 +232,14 @@ const App: React.FC = () => {
     setIsGenerating(false);
   };
 
+  // Close shift modal if clicking outside
+  useEffect(() => {
+      const handleClick = (e: MouseEvent) => {
+          // If modal is open and click is outside, close it (handled by ShiftManager internal backdrop, 
+          // but we can add extra safety here if needed)
+      }
+  }, []);
+
   const handlePrint = () => window.print();
   const canEdit = currentUser?.role === 'admin' || currentUser?.role === 'manager';
   const isAdmin = currentUser?.role === 'admin';
@@ -185,13 +247,13 @@ const App: React.FC = () => {
   if (!currentUser) return <LoginScreen onLogin={handleLogin} />;
 
   return (
-    <div className="flex flex-col h-screen w-screen bg-slate-100 overflow-hidden font-sans">
-      <header className="bg-company-blue text-white shadow-lg z-50 flex flex-col shrink-0 print:hidden w-full">
-        <div className="flex items-center justify-between px-6 py-2 border-b border-blue-900 w-full">
-            <div className="flex items-center gap-8">
+    <div ref={appContainerRef} className="flex flex-col h-screen w-screen bg-slate-100 overflow-hidden font-sans">
+      <header className="bg-company-blue text-white shadow-lg z-40 flex flex-col shrink-0 print:hidden w-full relative">
+        <div className="flex items-center justify-between px-6 py-2 border-b border-blue-900 w-full min-w-0">
+            <div className="flex items-center gap-8 shrink-0">
                  <div className="flex items-center gap-2">
                     <div className="w-8 h-8 bg-white rounded text-company-blue flex items-center justify-center font-bold text-xl">PS</div>
-                    <div><h1 className="text-lg font-bold tracking-tight leading-none">ESCALA FÁCIL</h1><p className="text-[10px] text-blue-200 tracking-wider uppercase">PREVENT SENIOR</p></div>
+                    <div className="hidden md:block"><h1 className="text-lg font-bold tracking-tight leading-none">ESCALA FÁCIL</h1><p className="text-[10px] text-blue-200 tracking-wider uppercase">PREVENT SENIOR</p></div>
                  </div>
                  <div className="flex gap-1 bg-blue-900/50 p-1 rounded-lg">
                      <button onClick={() => setCurrentView('roster')} className={`px-4 py-1.5 rounded text-xs font-bold uppercase transition-all ${currentView === 'roster' ? 'bg-white text-company-blue shadow' : 'text-blue-200 hover:text-white hover:bg-white/10'}`}>Escala Mensal</button>
@@ -199,30 +261,41 @@ const App: React.FC = () => {
                      <button onClick={() => setCurrentView('reports')} className={`px-4 py-1.5 rounded text-xs font-bold uppercase transition-all ${currentView === 'reports' ? 'bg-white text-company-blue shadow' : 'text-blue-200 hover:text-white hover:bg-white/10'}`}>Relatórios</button>
                  </div>
             </div>
+
+            <div className="flex-1 flex justify-center max-w-md mx-4 min-w-0">
+                 <input 
+                    type="text" 
+                    placeholder="🔍 Buscar (ID ou Nome)"
+                    className="w-full bg-blue-900/50 border border-blue-700 rounded-full px-4 py-1 text-sm text-white placeholder-blue-300 outline-none focus:bg-blue-800 transition-colors"
+                    value={globalSearchTerm}
+                    onChange={e => setGlobalSearchTerm(e.target.value)}
+                 />
+            </div>
+
             {currentView === 'roster' && (
-                <div className="flex items-center bg-blue-900 rounded p-1">
+                <div className="flex items-center bg-blue-900 rounded p-1 shrink-0">
                     <button onClick={() => handleMonthChange(-1)} className="p-1 hover:bg-white/10 rounded transition-colors text-white"><span className="text-lg">‹</span></button>
-                    <span className="w-40 text-center font-bold text-sm tracking-wide select-none uppercase">{MONTH_NAMES[schedule.month]} / {schedule.year}</span>
+                    <span className="w-40 text-center font-bold text-sm tracking-wide select-none uppercase hidden md:inline-block">{MONTH_NAMES[schedule.month]} / {schedule.year}</span>
                     <button onClick={() => handleMonthChange(1)} className="p-1 hover:bg-white/10 rounded transition-colors text-white"><span className="text-lg">›</span></button>
                 </div>
             )}
-            <div className="flex items-center gap-3">
-               <span className="text-xs text-blue-300 border-r border-blue-700 pr-3 mr-1">Olá, {currentUser.name}</span>
+            <div className="flex items-center gap-3 shrink-0 ml-4">
+               <span className="text-xs text-blue-300 border-r border-blue-700 pr-3 mr-1 hidden sm:inline">Olá, {currentUser.name.split(' ')[0]}</span>
                {isAdmin && (<button onClick={() => setShowUserMgmt(true)} className="text-xs bg-blue-800 px-2 py-1 rounded hover:bg-blue-700">Usuários</button>)}
                <button onClick={handleLogout} className="text-xs text-red-300 hover:text-red-100 underline">Sair</button>
             </div>
         </div>
         {currentView === 'roster' && (
-            <div className="bg-[#003399] px-6 py-2 flex items-center gap-6 shadow-inner shrink-0 text-white z-40 relative w-full">
+            <div className="bg-[#003399] px-6 py-2 flex items-center gap-4 lg:gap-6 shadow-inner shrink-0 text-white z-40 relative w-full flex-wrap overflow-visible">
                 <MultiSelect label="Unidade" options={activeUnits} selected={selectedUnits} onChange={setSelectedUnits} isAdmin={isAdmin} onEdit={() => setFilterManager({ isOpen: true, type: 'Unit' })} />
                 <MultiSelect label="Setor" options={activeSectors} selected={selectedSectors} onChange={setSelectedSectors} isAdmin={isAdmin} onEdit={() => setFilterManager({ isOpen: true, type: 'Sector' })} />
                 <MultiSelect label="Turno" options={activeShiftTypes} selected={selectedShiftTypes} onChange={setSelectedShiftTypes} isAdmin={isAdmin} onEdit={() => setFilterManager({ isOpen: true, type: 'Shift' })} />
-                <div className="flex-1 flex justify-end gap-3 items-end h-full pt-1">
-                    {isGenerating && (<div className="flex flex-col justify-center min-w-[200px] mr-4"><div className="flex justify-between text-[10px] text-blue-200 mb-1"><span>Gerando...</span><span>{generationProgress.current} / {generationProgress.total}</span></div><div className="w-full bg-blue-900 rounded-full h-2 overflow-hidden"><div className="bg-emerald-400 h-full transition-all duration-300 ease-out" style={{ width: `${(generationProgress.current / generationProgress.total) * 100}%` }}></div></div></div>)}
+                <div className="flex-1 flex justify-end gap-3 items-end h-full pt-1 shrink-0">
+                    {isGenerating && (<div className="flex flex-col justify-center min-w-[150px] mr-4 hidden lg:flex"><div className="flex justify-between text-[10px] text-blue-200 mb-1"><span>Gerando...</span><span>{generationProgress.current} / {generationProgress.total}</span></div><div className="w-full bg-blue-900 rounded-full h-2 overflow-hidden"><div className="bg-emerald-400 h-full transition-all duration-300 ease-out" style={{ width: `${(generationProgress.current / generationProgress.total) * 100}%` }}></div></div></div>)}
                     <Tooltip content="Salvar Alterações"><button onClick={handleSaveData} className="p-2 text-white hover:bg-white/10 rounded-full transition-all"><SaveIcon saved={isSaved} /></button></Tooltip>
                     <Tooltip content="Imprimir Escala"><button onClick={handlePrint} className="p-2 text-white hover:bg-white/10 rounded-full transition-all"><PrintIcon /></button></Tooltip>
-                    <div className="w-px h-8 bg-blue-700 mx-2"></div>
-                    {canEdit && (<>{isAdmin && (<Tooltip content="Legendas & Turnos"><button onClick={() => setShowShifts(true)} className="p-2 text-white hover:bg-white/10 rounded-full"><TagIcon /></button></Tooltip>)}<Tooltip content="Regras da IA"><button onClick={() => setShowRules(true)} className="p-2 text-white hover:bg-white/10 rounded-full"><ScaleIcon /></button></Tooltip><Tooltip content="Dimensionamento"><button onClick={() => setShowStaffing(true)} className="p-2 text-white hover:bg-white/10 rounded-full"><ChartBarIcon /></button></Tooltip><button onClick={handleAutoGenerate} disabled={isGenerating} className="ml-2 px-4 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold rounded uppercase shadow border border-emerald-400 disabled:opacity-50">{isGenerating ? 'Parar' : 'Gerar (IA)'}</button></>)}
+                    <div className="w-px h-8 bg-blue-700 mx-2 hidden sm:block"></div>
+                    {canEdit && (<>{isAdmin && (<Tooltip content="Legendas & Turnos"><button onClick={() => setShowShifts(true)} className="p-2 text-white hover:bg-white/10 rounded-full"><TagIcon /></button></Tooltip>)}<Tooltip content="Regras da IA"><button onClick={() => setShowRules(true)} className="p-2 text-white hover:bg-white/10 rounded-full"><MegaphoneIcon /></button></Tooltip><Tooltip content="Dimensionamento"><button onClick={() => setShowStaffing(true)} className="p-2 text-white hover:bg-white/10 rounded-full"><ChartBarIcon /></button></Tooltip><button onClick={handleAutoGenerate} disabled={isGenerating} className="ml-2 px-4 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold rounded uppercase shadow border border-emerald-400 disabled:opacity-50 min-w-max">{isGenerating ? 'Parar' : 'Gerar (IA)'}</button></>)}
                 </div>
             </div>
         )}
@@ -232,6 +305,7 @@ const App: React.FC = () => {
           {currentView === 'roster' ? (
                <div className="flex-1 flex flex-col h-full w-full p-0 print:p-0 overflow-hidden">
                     <RosterGrid employees={filteredEmployees} shifts={shifts} currentSchedule={schedule} setSchedule={setSchedule} rules={aiRules} staffingConfig={staffingConfig} isReadOnly={!canEdit} onUndo={handleUndo} onRedo={handleRedo}
+                        onUpdateEmployee={handleUpdateEmployee}
                         onReorderEmployees={(a,b) => {
                             if (!canEdit) return;
                             const newOrder = [...employees];
