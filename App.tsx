@@ -145,19 +145,30 @@ const App: React.FC = () => {
       setEmployees(prev => prev.map(e => e.id === id ? { ...e, [field]: value } : e));
   };
 
-  // Sync Lists
+  // Sync Lists - Clean Dirt
   useEffect(() => {
-      const newUnits = new Set(units);
-      const newSectors = new Set(sectors);
-      const newTypes = new Set(shiftTypesList);
-      let changed = false;
+      // Rebuild lists based on INITIAL values + Currently Existing Employees
+      // This ensures that if an employee (and their unique unit) is deleted, the unit is removed from filters
+      const builtUnits = new Set(INITIAL_UNITS);
+      const builtSectors = new Set(INITIAL_SECTORS);
+      const builtTypes = new Set(INITIAL_SHIFT_TYPES);
+
       employees.forEach(e => {
-          if(e.unit && !newUnits.has(e.unit)) { newUnits.add(e.unit); changed = true; }
-          if(e.sector && !newSectors.has(e.sector)) { newSectors.add(e.sector); changed = true; }
-          if(e.shiftType && !newTypes.has(e.shiftType)) { newTypes.add(e.shiftType); changed = true; }
+          if(e.unit) builtUnits.add(e.unit);
+          if(e.sector) builtSectors.add(e.sector);
+          if(e.shiftType) builtTypes.add(e.shiftType);
       });
-      if(changed) { setUnits(Array.from(newUnits).sort()); setSectors(Array.from(newSectors).sort()); setShiftTypesList(Array.from(newTypes).sort()); }
-  }, [employees]);
+
+      const sortedUnits = Array.from(builtUnits).sort();
+      const sortedSectors = Array.from(builtSectors).sort();
+      const sortedTypes = Array.from(builtTypes).sort();
+
+      // Update state only if changed to avoid loops
+      if (JSON.stringify(sortedUnits) !== JSON.stringify(units)) setUnits(sortedUnits);
+      if (JSON.stringify(sortedSectors) !== JSON.stringify(sectors)) setSectors(sortedSectors);
+      if (JSON.stringify(sortedTypes) !== JSON.stringify(shiftTypesList)) setShiftTypesList(sortedTypes);
+      
+  }, [employees]); // Dependency on employees ensures cleanup when employees are deleted
 
   // --- DERIVED LISTS FOR FILTERS (Restricted by User Permissions) ---
   const availableEmployees = useMemo(() => {

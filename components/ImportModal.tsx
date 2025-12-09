@@ -39,7 +39,12 @@ export const ImportModal: React.FC<Props> = ({ isOpen, onClose, onImport }) => {
                 const separator = rows[i].includes(';') ? ';' : ',';
                 const cols = rows[i].split(separator).map(c => c.trim().replace(/^"|"$/g, ''));
                 
+                // VALIDATION: Skip empty lines or lines without minimal data (Name/ID)
                 if (cols.length < 3) continue;
+                const name = cols[0]?.trim();
+                const id = cols[1]?.trim();
+                
+                if (!name || !id) continue;
 
                 // Handle Bank Hours
                 let bh = cols[7] || '00:00';
@@ -48,8 +53,8 @@ export const ImportModal: React.FC<Props> = ({ isOpen, onClose, onImport }) => {
                 }
 
                 const emp: Employee = {
-                    name: cols[0]?.toUpperCase() || 'SEM NOME',
-                    id: cols[1] || Date.now().toString() + Math.random().toString(36).substr(2, 5),
+                    name: name.toUpperCase(),
+                    id: id,
                     role: cols[2]?.toUpperCase() || 'COLABORADOR',
                     cpf: cols[3] || '',
                     shiftPattern: cols[4]?.toUpperCase() || '5X2',
