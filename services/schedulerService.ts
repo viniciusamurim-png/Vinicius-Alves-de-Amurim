@@ -38,6 +38,36 @@ const getInitialConsecutiveDays = (lastDayOff: string | undefined, currentMonth:
     return Math.max(0, diffDays - 1);
 };
 
+// Helper to determine if 12x36 starts with DSR or WORK on day 1
+const determine12x36Start = (lastDayOffStr: string | undefined, currentMonth: number, currentYear: number): 'DSR' | 'WORK' | 'UNKNOWN' => {
+    if (!lastDayOffStr) return 'UNKNOWN';
+    // Robust parsing
+    const parts = lastDayOffStr.split('-');
+    if (parts.length !== 3) return 'UNKNOWN';
+    
+    const y = parseInt(parts[0]);
+    const m = parseInt(parts[1]) - 1; // JS months are 0-based
+    const d = parseInt(parts[2]);
+    
+    const lastOff = new Date(y, m, d);
+    const firstOfMonth = new Date(currentYear, currentMonth, 1);
+    
+    // Normalize time to avoid timezone bugs
+    lastOff.setHours(0,0,0,0);
+    firstOfMonth.setHours(0,0,0,0);
+
+    const diffTime = firstOfMonth.getTime() - lastOff.getTime();
+    const diffDays = Math.round(diffTime / (1000 * 60 * 60 * 24));
+
+    if (diffDays <= 0) return 'UNKNOWN'; 
+
+    // Logic: 
+    // If Last Day Off was yesterday (diff=1), today is WORK.
+    // If Last Day Off was 2 days ago (diff=2), today is DSR (Day Off).
+    // Pattern: Odd diff = WORK, Even diff = DSR.
+    return (diffDays % 2 === 0) ? 'DSR' : 'WORK';
+};
+
 export const calculateRequiredDaysOff = (month: number, year: number, shiftPattern: string): number => {
     // 12x36 Rule: Technically works 15 days, rests 15 (as DSR). Plus 1 or 2 extra Folgas.
     // For grid target purpose, let's count DSRs + 2 (approximate for fortnightly rule)
@@ -135,7 +165,7 @@ export const generateAISchedule = async (
     const folgaShift = shifts.find(s => s.code === 'F');
     const folgaId = folgaShift ? folgaShift.id : 'folga';
     const dsrShift = shifts.find(s => s.code === 'DSR');
-    const dsrId = dsrShift ? dsrShift.id : 'dsr';
+    const dsrId = dsrShift ? dsrShift.id : 'dsr'; // Fallback if DSR code changed
 
     let combinedAssignments: Record<string, Record<string, string>> = {};
     const totalEmployees = employees.length;
@@ -150,45 +180,44 @@ export const generateAISchedule = async (
         }
 
         const prompt = `
-          Atue como especialista em escalas de trabalho CLT.
+          Atue como especialista em escalas de trabalho.
           Gere os dias de FOLGA ("${folgaId}") e DESCANSO ("${dsrId}") para o período ${startDate} a ${endDate}.
           
           IMPORTANTE: Retorne APENAS os dias que NÃO são trabalho (F ou DSR). Os dias de trabalho devem ficar vazios (null).
 
           REGRAS GERAIS:
-          1. Considere 'lastDayOff' para determinar se o dia 1 do mês é trabalho ou folga (especialmente para 12x36).
-          2. Não deixe todos os colaboradores do mesmo setor folgarem no mesmo dia (para escalas diárias).
+          1. Considere os dados fornecidos para cada colaborador individualmente.
           
           REGRAS POR TIPO DE ESCALA:
           
           [ESCALA 12x36]
-          - ESSENCIAL: Você DEVE gerar os dias de descanso ("${dsrId}") alternados com os dias de trabalho.
-          - O padrão é: Dia sim (Trabalho/Null), Dia não (Descanso/${dsrId}).
-          - Verifique 'lastDayOff' para saber a sequência correta. Se lastDayOff foi o último dia do mês anterior, dia 1 é Trabalho. Se foi o penúltimo, dia 1 é DSR.
-          - ALÉM do padrão 1x1, aplique a "Folga Extra Quinzenal": O colaborador precisa de 1 folga extra ("${folgaId}") a cada quinzena.
-          - A folga extra ("${folgaId}") SUBSTITUI um dia que seria de trabalho na sequência.
-          - Resultado visual esperado no JSON para a sequência: ... DSR | ${folgaId} | DSR ... (Onde ${folgaId} tomou o lugar de um dia de trabalho).
-          - NUNCA retorne null (trabalho) para os dias que devem ser DSR. Eles precisam ser preenchidos explicitamente com "${dsrId}".
+          - Esta escala é a MAIS IMPORTANTE. Deve ser preenchida RIGOROSAMENTE.
+          - O sistema calculou o campo 'patternStart' para cada colaborador.
+          - Se patternStart for 'DSR': O Dia 01 do mês é DESCANSO ("${dsrId}"). O Dia 02 é Trabalho (Vazio). O Dia 03 é DESCANSO ("${dsrId}"), etc.
+          - Se patternStart for 'WORK': O Dia 01 do mês é Trabalho (Vazio). O Dia 02 é DESCANSO ("${dsrId}"). O Dia 03 é Trabalho (Vazio), etc.
+          - Se patternStart for 'UNKNOWN': Assuma Trabalho no dia 01 e Descanso no dia 02.
+          - OBRIGATÓRIO: Todos os dias de descanso padrão da alternância 1x1 DEVEM ser preenchidos com "${dsrId}". Não deixe vazio.
+          - FOLGA EXTRA: Além do padrão 1x1, insira 1 folga extra ("${folgaId}") a cada quinzena, substituindo um dia que seria de trabalho.
           
           [ESCALA 6x1]
           - Trabalha 6, Folga 1.
-          - Quantidade de Folgas no Mês = Número de Domingos + Número de Feriados no mês.
+          - Quantidade de Folgas = Domingos + Feriados.
           - Use "${folgaId}" para todas as folgas.
-          - Priorize domingos para mulheres.
-          - Respeite o limite de ${rules.maxConsecutiveDays} dias de trabalho seguidos.
+          - Mulheres: Priorizar folga quinzenal aos domingos.
+          - Homens: Priorizar folga a cada 3 domingos.
+          - Limite: ${rules.maxConsecutiveDays} dias consecutivos de trabalho.
 
           [ESCALA 5x2]
-          - Trabalha 5, Folga 2.
-          - Quantidade de Folgas no Mês = Sábados + Domingos + Feriados.
-          - Use "${folgaId}" para todas as folgas.
-          - Normalmente folgam Sáb e Dom, mas se necessário, distribua.
+          - Use "${folgaId}" para as 2 folgas semanais e feriados.
 
-          COLABORADORES (Lote ${Math.floor(i / BATCH_SIZE) + 1}):
+          DADOS DOS COLABORADORES (Lote ${Math.floor(i / BATCH_SIZE) + 1}):
           ${JSON.stringify(batch.map(e => ({ 
               id: e.id, 
               pattern: e.shiftPattern,
               gender: e.gender,
               lastDayOff: e.lastDayOff,
+              // Explicitly calculate start state for 12x36 to remove ambiguity for AI
+              patternStart12x36: determine12x36Start(e.lastDayOff, month, year),
               initialConsecutiveDays: getInitialConsecutiveDays(e.lastDayOff, month, year)
           })))}
 
