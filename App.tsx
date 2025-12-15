@@ -61,6 +61,9 @@ const App: React.FC = () => {
   const [schedule, setScheduleState] = useState<MonthlySchedule>({ month: currentDate.getMonth(), year: currentDate.getFullYear(), assignments: {}, attachments: {}, comments: {} });
   const [historyPast, setHistoryPast] = useState<MonthlySchedule[]>([]);
   const [historyFuture, setHistoryFuture] = useState<MonthlySchedule[]>([]);
+  
+  // DIRTY STATE TRACKING
+  const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
 
   const setSchedule = useCallback((value: React.SetStateAction<MonthlySchedule>) => {
       setScheduleState(prev => {
@@ -68,10 +71,23 @@ const App: React.FC = () => {
           if (next !== prev) {
               setHistoryPast(past => [...past, prev]);
               setHistoryFuture([]);
+              setHasUnsavedChanges(true);
           }
           return next;
       });
   }, []);
+
+  // UNSAVED CHANGES WARNING
+  useEffect(() => {
+    const handleBeforeUnload = (e: BeforeUnloadEvent) => {
+        if (hasUnsavedChanges) {
+            e.preventDefault();
+            e.returnValue = '';
+        }
+    };
+    window.addEventListener('beforeunload', handleBeforeUnload);
+    return () => window.removeEventListener('beforeunload', handleBeforeUnload);
+  }, [hasUnsavedChanges]);
 
   const handleUndo = useCallback(() => {
       if (historyPast.length === 0) return;
@@ -80,6 +96,7 @@ const App: React.FC = () => {
       setHistoryFuture(future => [schedule, ...future]);
       setScheduleState(previous);
       setHistoryPast(newPast);
+      setHasUnsavedChanges(true);
   }, [historyPast, schedule]);
 
   const handleRedo = useCallback(() => {
@@ -89,6 +106,7 @@ const App: React.FC = () => {
       setHistoryPast(past => [...past, schedule]);
       setScheduleState(next);
       setHistoryFuture(newFuture);
+      setHasUnsavedChanges(true);
   }, [historyFuture, schedule]);
 
   const [isGenerating, setIsGenerating] = useState(false);
@@ -103,8 +121,10 @@ const App: React.FC = () => {
   const [showGenerationScope, setShowGenerationScope] = useState(false);
   const [filterManager, setFilterManager] = useState<{ isOpen: boolean, type: 'Unit' | 'Sector' | 'Shift' | null }>({ isOpen: false, type: null });
 
-  // Confirmation Modal State
+  // Clear Schedule Logic
+  const [clearScopeModalOpen, setClearScopeModalOpen] = useState(false);
   const [showConfirmClear, setShowConfirmClear] = useState(false);
+  const [clearTargetIds, setClearTargetIds] = useState<string[]>([]); // If empty, means all visible
 
   // Refs for click outside
   const appContainerRef = useRef<HTMLDivElement>(null);
@@ -131,24 +151,29 @@ const App: React.FC = () => {
   }, []);
 
   const handleLogin = (user: User) => { setCurrentUser(user); localStorage.setItem('CURRENT_SESSION', JSON.stringify(user)); };
-  const handleLogout = () => { setCurrentUser(null); localStorage.removeItem('CURRENT_SESSION'); };
+  const handleLogout = () => { 
+      if (hasUnsavedChanges) {
+          if(!confirm("Você tem alterações não salvas. Tem certeza que deseja sair e perder os dados?")) return;
+      }
+      setCurrentUser(null); localStorage.removeItem('CURRENT_SESSION'); 
+  };
 
   const handleSaveData = () => {
       const dataToSave = { employees, shifts, schedule, aiRules, staffingConfig, units, sectors, shiftTypesList };
       localStorage.setItem('ESCALA_FACIL_DATA', JSON.stringify(dataToSave));
       if (currentUser) { localStorage.setItem('CURRENT_SESSION', JSON.stringify(currentUser)); }
       setIsSaved(true);
+      setHasUnsavedChanges(false);
       setTimeout(() => setIsSaved(false), 2000);
   };
 
   const handleUpdateEmployee = (id: string, field: string, value: string) => {
       setEmployees(prev => prev.map(e => e.id === id ? { ...e, [field]: value } : e));
+      setHasUnsavedChanges(true);
   };
 
-  // Sync Lists - Clean Dirt
+  // Sync Lists - Clean Dirt + Uppercase Shifts
   useEffect(() => {
-      // Rebuild lists based on INITIAL values + Currently Existing Employees
-      // This ensures that if an employee (and their unique unit) is deleted, the unit is removed from filters
       const builtUnits = new Set(INITIAL_UNITS);
       const builtSectors = new Set(INITIAL_SECTORS);
       const builtTypes = new Set(INITIAL_SHIFT_TYPES);
@@ -156,19 +181,18 @@ const App: React.FC = () => {
       employees.forEach(e => {
           if(e.unit) builtUnits.add(e.unit);
           if(e.sector) builtSectors.add(e.sector);
-          if(e.shiftType) builtTypes.add(e.shiftType);
+          if(e.shiftType) builtTypes.add(e.shiftType.toUpperCase());
       });
 
       const sortedUnits = Array.from(builtUnits).sort();
       const sortedSectors = Array.from(builtSectors).sort();
       const sortedTypes = Array.from(builtTypes).sort();
 
-      // Update state only if changed to avoid loops
       if (JSON.stringify(sortedUnits) !== JSON.stringify(units)) setUnits(sortedUnits);
       if (JSON.stringify(sortedSectors) !== JSON.stringify(sectors)) setSectors(sortedSectors);
       if (JSON.stringify(sortedTypes) !== JSON.stringify(shiftTypesList)) setShiftTypesList(sortedTypes);
       
-  }, [employees]); // Dependency on employees ensures cleanup when employees are deleted
+  }, [employees]);
 
   // --- DERIVED LISTS FOR FILTERS (Restricted by User Permissions) ---
   const availableEmployees = useMemo(() => {
@@ -234,19 +258,57 @@ const App: React.FC = () => {
   }, [availableEmployees, selectedUnits, selectedSectors, selectedShiftTypes, currentUser, globalSearchTerm, schedule.year, schedule.month]);
 
   const handleMonthChange = (offset: number) => {
+    if (hasUnsavedChanges) {
+        if (!confirm("Existem alterações não salvas. Mudar de mês descartará o histórico de desfazer. Continuar?")) return;
+        setHasUnsavedChanges(false);
+    }
     const newDate = new Date(currentDate.getFullYear(), currentDate.getMonth() + offset, 1);
     setCurrentDate(newDate);
     setSchedule(prev => ({ ...prev, month: newDate.getMonth(), year: newDate.getFullYear() }));
     setHistoryPast([]); setHistoryFuture([]);
   };
 
+  const handleClearClick = () => {
+      // First open scope selection
+      setClearScopeModalOpen(true);
+  }
+
+  const handleScopeConfirm = (ids: string[]) => {
+      setClearTargetIds(ids);
+      setClearScopeModalOpen(false);
+      setShowConfirmClear(true); // Then open confirmation
+  }
+
   const executeClearSchedule = () => {
-      setSchedule(prev => ({
-          ...prev,
-          assignments: {},
-          attachments: {},
-          comments: {}
-      }));
+      setSchedule(prev => {
+          const newAssignments = { ...prev.assignments };
+          const newAttachments = { ...prev.attachments };
+          const newComments = { ...prev.comments };
+
+          const targets = clearTargetIds.length > 0 ? filteredEmployees.filter(e => clearTargetIds.includes(e.id)) : filteredEmployees;
+
+          targets.forEach(emp => {
+              // We need to clear only the current month's data keys
+              // But since structure is flat per employee per key, we must iterate keys or just clear employee obj if we assume strict month management?
+              // The state structure: assignments[empId][dateKey]
+              // Best way: Iterate days of current month and delete keys.
+              const daysInMonth = new Date(prev.year, prev.month + 1, 0).getDate();
+              for(let d=1; d<=daysInMonth; d++) {
+                  const key = `${prev.year}-${String(prev.month + 1).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
+                  if (newAssignments[emp.id]) delete newAssignments[emp.id][key];
+                  if (newAttachments && newAttachments[emp.id]) delete newAttachments[emp.id][key];
+                  if (newComments && newComments[emp.id]) delete newComments[emp.id][key];
+              }
+          });
+
+          return {
+              ...prev,
+              assignments: newAssignments,
+              attachments: newAttachments,
+              comments: newComments
+          };
+      });
+      setHasUnsavedChanges(true);
   }
 
   const handleAutoGenerateClick = () => {
@@ -264,17 +326,9 @@ const App: React.FC = () => {
 
       const result = await generateAISchedule(targetEmployees, shifts, schedule.month, schedule.year, aiRules, (current, total) => setGenerationProgress({ current, total }));
 
-      if (result) { setSchedule(prev => ({ ...prev, assignments: { ...prev.assignments, ...result } })); } else { alert("Erro ao gerar escala."); }
+      if (result) { setSchedule(prev => ({ ...prev, assignments: { ...prev.assignments, ...result } })); setHasUnsavedChanges(true); } else { alert("Erro ao gerar escala."); }
       setIsGenerating(false);
   };
-
-  // Close shift modal if clicking outside
-  useEffect(() => {
-      const handleClick = (e: MouseEvent) => {
-          // If modal is open and click is outside, close it (handled by ShiftManager internal backdrop, 
-          // but we can add extra safety here if needed)
-      }
-  }, []);
 
   const handlePrint = () => window.print();
   const canEdit = currentUser?.role === 'admin' || currentUser?.role === 'manager';
@@ -328,33 +382,85 @@ const App: React.FC = () => {
                 <MultiSelect label="Turno" options={activeShiftTypes} selected={selectedShiftTypes} onChange={setSelectedShiftTypes} isAdmin={isAdmin} onEdit={() => setFilterManager({ isOpen: true, type: 'Shift' })} />
                 <div className="flex-1 flex justify-end gap-3 items-end h-full pt-1 shrink-0">
                     {isGenerating && (<div className="flex flex-col justify-center min-w-[150px] mr-4 hidden lg:flex"><div className="flex justify-between text-[10px] text-blue-200 mb-1"><span>Gerando...</span><span>{generationProgress.current} / {generationProgress.total}</span></div><div className="w-full bg-blue-900 rounded-full h-2 overflow-hidden"><div className="bg-emerald-400 h-full transition-all duration-300 ease-out" style={{ width: `${(generationProgress.current / generationProgress.total) * 100}%` }}></div></div></div>)}
-                    <Tooltip content="Salvar Alterações"><button onClick={handleSaveData} className="p-2 text-white hover:bg-white/10 rounded-full transition-all"><SaveIcon saved={isSaved} /></button></Tooltip>
+                    
+                    {hasUnsavedChanges && <span className="text-xs text-yellow-300 font-bold animate-pulse mr-2 mb-2">Alterações não salvas!</span>}
+
+                    <Tooltip content="Salvar Alterações"><button onClick={handleSaveData} className={`p-2 rounded-full transition-all ${hasUnsavedChanges ? 'bg-yellow-600/50 animate-bounce' : 'hover:bg-white/10'}`}><SaveIcon saved={isSaved} /></button></Tooltip>
                     <Tooltip content="Imprimir Escala"><button onClick={handlePrint} className="p-2 text-white hover:bg-white/10 rounded-full transition-all"><PrintIcon /></button></Tooltip>
-                    {isAdmin && (<Tooltip content="Limpar Escala"><button onClick={() => setShowConfirmClear(true)} className="p-2 text-red-300 hover:bg-red-500/20 hover:text-red-200 rounded-full transition-all"><TrashIcon /></button></Tooltip>)}
+                    {canEdit && (<Tooltip content="Limpar Escala"><button onClick={handleClearClick} className="p-2 text-red-300 hover:bg-red-500/20 hover:text-red-200 rounded-full transition-all"><TrashIcon /></button></Tooltip>)}
                     <div className="w-px h-8 bg-blue-700 mx-2 hidden sm:block"></div>
                     {canEdit && (<>{isAdmin && (<Tooltip content="Legendas & Turnos"><button onClick={() => setShowShifts(true)} className="p-2 text-white hover:bg-white/10 rounded-full"><TagIcon /></button></Tooltip>)}<Tooltip content="Regras da IA"><button onClick={() => setShowRules(true)} className="p-2 text-white hover:bg-white/10 rounded-full"><MegaphoneIcon /></button></Tooltip><Tooltip content="Dimensionamento"><button onClick={() => setShowStaffing(true)} className="p-2 text-white hover:bg-white/10 rounded-full"><ChartBarIcon /></button></Tooltip><button onClick={handleAutoGenerateClick} disabled={isGenerating} className="ml-2 px-4 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold rounded uppercase shadow border border-emerald-400 disabled:opacity-50 min-w-max">{isGenerating ? 'Parar' : 'Gerar (IA)'}</button></>)}
                 </div>
             </div>
         )}
       </header>
+      
+      {/* PRINT ONLY HEADER */}
+      <div className="hidden print:block p-4 border-b border-gray-300 bg-white">
+          <div className="flex items-center justify-between mb-2">
+              <div className="flex items-center gap-2">
+                 <div className="w-10 h-10 bg-[#002060] text-white flex items-center justify-center font-bold text-xl rounded">PS</div>
+                 <div>
+                     <h1 className="text-xl font-bold text-[#002060]">ESCALA FÁCIL - PREVENT SENIOR</h1>
+                     <p className="text-sm font-bold text-gray-600 uppercase">{MONTH_NAMES[schedule.month]} / {schedule.year}</p>
+                 </div>
+              </div>
+              <div className="text-right text-[10px] text-gray-500">
+                  Impresso em: {new Date().toLocaleDateString()}
+              </div>
+          </div>
+          <div className="flex gap-4 text-xs font-bold border rounded p-2 bg-gray-50">
+              <div>UNIDADE: {selectedUnits.length ? selectedUnits.join(', ') : 'TODAS'}</div>
+              <div className="border-l pl-4">SETOR: {selectedSectors.length ? selectedSectors.join(', ') : 'TODOS'}</div>
+              <div className="border-l pl-4">TURNO: {selectedShiftTypes.length ? selectedShiftTypes.join(', ') : 'TODOS'}</div>
+          </div>
+      </div>
 
       <main className="flex-1 flex flex-col overflow-hidden relative print:p-0 print:overflow-visible bg-white z-0 w-full h-full">
           {currentView === 'roster' ? (
                <div className="flex-1 flex flex-col h-full w-full p-0 print:p-0 overflow-hidden">
                     <RosterGrid employees={filteredEmployees} shifts={shifts} currentSchedule={schedule} setSchedule={setSchedule} rules={aiRules} staffingConfig={staffingConfig} isReadOnly={!canEdit} onUndo={handleUndo} onRedo={handleRedo}
+                        currentUserId={currentUser.id}
                         onUpdateEmployee={handleUpdateEmployee}
                         onReorderEmployees={(a,b) => {
                             if (!canEdit) return;
                             const newOrder = [...employees];
                             const from = newOrder.findIndex(e => e.id === a);
                             const to = newOrder.findIndex(e => e.id === b);
-                            if(from >=0 && to >=0) { const [moved] = newOrder.splice(from, 1); newOrder.splice(to, 0, moved); setEmployees(newOrder); }
+                            if(from >=0 && to >=0) { const [moved] = newOrder.splice(from, 1); newOrder.splice(to, 0, moved); setEmployees(newOrder); setHasUnsavedChanges(true); }
                         }}/>
                </div>
           ) : currentView === 'database' ? (
                <div className="h-full w-full"><EmployeeDatabaseScreen employees={employees} setEmployees={setEmployees} units={units} sectors={sectors} shiftTypes={shiftTypesList} /></div>
           ) : (<ReportsScreen employees={filteredEmployees} schedule={schedule} shifts={shifts} />)}
       </main>
+
+      {/* PRINT ONLY FOOTER - LEGENDS & SIGNATURES */}
+      {currentView === 'roster' && (
+        <div className="hidden print:block p-4 mt-auto border-t border-gray-300 break-inside-avoid">
+             <div className="mb-4">
+                 <h4 className="font-bold text-xs uppercase mb-1">Legendas:</h4>
+                 <div className="flex flex-wrap gap-2 text-[9px]">
+                     {shifts.filter(s => ['work', 'dayoff', 'absence', 'leave'].includes(s.category)).map(s => (
+                         <div key={s.id} className="flex items-center border rounded px-1 min-w-[80px]">
+                             <span className={`w-4 h-4 flex items-center justify-center font-bold border mr-1 ${s.color} ${s.textColor}`}>{s.code}</span>
+                             <span>{s.name}</span>
+                         </div>
+                     ))}
+                 </div>
+             </div>
+             <div className="flex justify-between items-end pt-8 gap-8">
+                 <div className="flex-1 border-t border-black text-center pt-1">
+                     <p className="font-bold text-xs">Responsável pela Escala</p>
+                     <p className="text-[10px] text-gray-500">Assinatura / Carimbo</p>
+                 </div>
+                 <div className="flex-1 border-t border-black text-center pt-1">
+                     <p className="font-bold text-xs">Representante Prevent Senior</p>
+                     <p className="text-[10px] text-gray-500">Assinatura / Carimbo</p>
+                 </div>
+             </div>
+        </div>
+      )}
 
       {showEmployees && <EmployeeManager employees={employees} setEmployees={setEmployees} onClose={() => setShowEmployees(false)} />}
       {showShifts && <ShiftManager shifts={shifts} setShifts={setShifts} onClose={() => setShowShifts(false)} />}
@@ -364,14 +470,21 @@ const App: React.FC = () => {
       <GenerationScopeModal isOpen={showGenerationScope} onClose={() => setShowGenerationScope(false)} employees={filteredEmployees} onConfirm={handleConfirmGeneration} />
       <FilterManagerModal isOpen={filterManager.isOpen} onClose={() => setFilterManager({ isOpen: false, type: null })} title={filterManager.type || ''} items={filterManager.type === 'Unit' ? units : filterManager.type === 'Sector' ? sectors : shiftTypesList} setItems={filterManager.type === 'Unit' ? setUnits : filterManager.type === 'Sector' ? setSectors : setShiftTypesList} />
       
-      {/* GLOBAL CONFIRMATION MODALS */}
+      {/* CLEAR SCHEDULE MODALS */}
+      <GenerationScopeModal // REUSING THIS MODAL FOR SCOPE SELECTION (It has correct logic)
+         isOpen={clearScopeModalOpen} 
+         onClose={() => setClearScopeModalOpen(false)}
+         employees={filteredEmployees}
+         onConfirm={handleScopeConfirm}
+      />
+      
       <ConfirmationModal 
         isOpen={showConfirmClear}
         onClose={() => setShowConfirmClear(false)}
         onConfirm={executeClearSchedule}
-        title="Limpar Escala Inteira"
-        message="ATENÇÃO: Isso apagará TODAS as legendas, folgas, anexos e observações da escala do mês atual visível. Esta ação não pode ser desfeita. Deseja continuar?"
-        confirmText="Limpar Tudo"
+        title="Confirmar Limpeza"
+        message={`ATENÇÃO: Você está prestes a limpar a escala de ${clearTargetIds.length === 0 ? 'TODOS os colaboradores visíveis' : clearTargetIds.length + ' colaboradores selecionados'} para este mês. Isso apagará turnos, anexos e observações. Deseja continuar?`}
+        confirmText="Limpar Agora"
         isDangerous={true}
       />
     </div>

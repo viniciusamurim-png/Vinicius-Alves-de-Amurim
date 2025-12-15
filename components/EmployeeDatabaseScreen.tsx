@@ -94,8 +94,8 @@ export const EmployeeDatabaseScreen: React.FC<Props> = ({ employees, setEmployee
 
   const handleImport = (newEmps: Employee[]) => {
       setEmployees(prev => {
-          // Upsert logic: Create a map of existing employees by ID
-          const empMap = new Map(prev.map(e => [e.id, e]));
+          // Upsert logic: Create a map of existing employees by ID. Explicitly type as [string, Employee] to avoid inference issues.
+          const empMap = new Map<string, Employee>(prev.map(e => [e.id, e]));
           
           newEmps.forEach(importedEmp => {
               if (empMap.has(importedEmp.id)) {
@@ -301,7 +301,9 @@ export const EmployeeDatabaseScreen: React.FC<Props> = ({ employees, setEmployee
                                       <div className="text-xs font-medium">{emp.shiftPattern} ({emp.shiftType})</div>
                                       <div className="text-[10px] text-slate-600 mb-0.5">{emp.workTime}</div>
                                       <div className="text-[10px] text-green-600 font-bold">BH: {emp.bankHoursBalance}</div>
-                                      <div className="text-[9px] text-slate-400 mt-1">UF: {emp.lastDayOff || '-'}</div>
+                                      <div className="text-[9px] text-slate-400 mt-1">
+                                          UF: {emp.lastDayOff ? emp.lastDayOff.split('-').reverse().slice(0, 2).join('/') : '-'}
+                                      </div>
                                       {emp.terminationDate && <div className="text-[9px] text-red-500 font-bold mt-1">Deslig: {emp.terminationDate}</div>}
                                   </td>
                                   <td className="p-3 text-right">

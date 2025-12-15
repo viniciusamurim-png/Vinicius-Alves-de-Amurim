@@ -34,7 +34,7 @@ export interface Employee {
   terminationDate?: string; // Data de Desligamento (YYYY-MM-DD)
 }
 
-export type ShiftCategory = 'work' | 'dayoff' | 'absence' | 'leave';
+export type ShiftCategory = 'work' | 'dayoff' | 'absence' | 'leave' | 'abono';
 
 export interface Shift {
   id: string;

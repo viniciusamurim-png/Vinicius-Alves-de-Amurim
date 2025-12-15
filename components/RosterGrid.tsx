@@ -1,7 +1,7 @@
 
 import React, { useMemo, useState, useEffect, useRef } from 'react';
 import { Employee, Shift, MonthlySchedule, AIRulesConfig, StaffingConfig, GridSelection, ExtendedColumnKey } from '../types';
-import { getDaysInMonth, validateSchedule } from '../services/schedulerService';
+import { getDaysInMonth, validateSchedule, calculateRequiredDaysOff } from '../services/schedulerService';
 import { Tooltip } from './Tooltip';
 import { HOLIDAYS, COMMENTS_OPTIONS } from '../constants';
 
@@ -17,6 +17,7 @@ interface Props {
   isReadOnly?: boolean;
   onUndo?: () => void;
   onRedo?: () => void;
+  currentUserId?: string; // New prop for persistence
 }
 
 interface ContextMenuState {
@@ -41,7 +42,7 @@ interface DailyStat {
 
 export const RosterGrid: React.FC<Props> = ({ 
     employees, shifts, currentSchedule, setSchedule, rules, staffingConfig, 
-    onReorderEmployees, onUpdateEmployee, isReadOnly = false, onUndo, onRedo 
+    onReorderEmployees, onUpdateEmployee, isReadOnly = false, onUndo, onRedo, currentUserId
 }) => {
   const [contextMenu, setContextMenu] = useState<ContextMenuState>({ visible: false, type: 'cell', x: 0, y: 0 });
   const menuRef = useRef<HTMLDivElement>(null);
@@ -56,15 +57,38 @@ export const RosterGrid: React.FC<Props> = ({
 
   const [draggedEmployeeId, setDraggedEmployeeId] = useState<string | null>(null);
   const [sortConfig, setSortConfig] = useState<{ key: ExtendedColumnKey | null, direction: 'asc' | 'desc' }>({ key: null, direction: 'asc' });
-  const [hiddenColumns, setHiddenColumns] = useState<ExtendedColumnKey[]>([]);
   
-  // Initialize frozen columns with 'name' by default so it stays sticky, others scroll
+  // State initialization from localStorage if available
+  const [hiddenColumns, setHiddenColumns] = useState<ExtendedColumnKey[]>([]);
   const [frozenColumns, setFrozenColumns] = useState<ExtendedColumnKey[]>(['name']);
-
-  // RESIZING STATE
   const [colWidths, setColWidths] = useState<Record<ExtendedColumnKey, number>>({
       name: 220, id: 80, role: 120, cpf: 100, scale: 60, time: 80, shiftType: 100, position: 80, council: 100, bh: 60, uf: 95
   });
+
+  // Load User Preferences
+  useEffect(() => {
+      if (currentUserId) {
+          const stored = localStorage.getItem(`USER_PREFS_${currentUserId}`);
+          if (stored) {
+              const prefs = JSON.parse(stored);
+              if (prefs.hiddenColumns) setHiddenColumns(prefs.hiddenColumns);
+              if (prefs.frozenColumns) setFrozenColumns(prefs.frozenColumns);
+              if (prefs.colWidths) setColWidths(prefs.colWidths);
+          }
+      }
+  }, [currentUserId]);
+
+  // Save User Preferences
+  useEffect(() => {
+      if (currentUserId) {
+          localStorage.setItem(`USER_PREFS_${currentUserId}`, JSON.stringify({
+              hiddenColumns,
+              frozenColumns,
+              colWidths
+          }));
+      }
+  }, [hiddenColumns, frozenColumns, colWidths, currentUserId]);
+
   const [resizing, setResizing] = useState<{ key: ExtendedColumnKey, startX: number, startWidth: number } | null>(null);
 
   // Selection & Focus
@@ -598,6 +622,13 @@ export const RosterGrid: React.FC<Props> = ({
         // Stats
         let daysOffCount = 0;
         Object.values(currentSchedule.assignments[employee.id] || {}).forEach(sid => { if (shifts.find(s=>s.id===sid)?.category === 'dayoff') daysOffCount++; });
+        
+        // Target Days Off Logic
+        const targetDaysOff = calculateRequiredDaysOff(currentSchedule.month, currentSchedule.year, employee.shiftPattern);
+        // If extra days allowed, we allow surplus. If surplus is because of extra days config, it might be OK, 
+        // but user asked for RED alert if actual > target (assuming target is the strict required).
+        // Actually user said: "se o gestor habilitou a opção de 'Gerar folgas a mais'... e colocou 1 a mais... aparecer 06/05 ficando vermelho".
+        const isExcessDaysOff = daysOffCount > targetDaysOff;
 
         return (
             <div key={employee.id} className="flex border-b border-slate-300 bg-white hover:bg-blue-50 transition-colors group h-9">
@@ -607,11 +638,11 @@ export const RosterGrid: React.FC<Props> = ({
                         let val = key === 'scale' ? employee.shiftPattern : key === 'time' ? employee.workTime : key === 'position' ? employee.positionNumber : key === 'council' ? employee.categoryCode : key === 'bh' ? employee.bankHoursBalance : key === 'uf' ? employee.lastDayOff : (employee as any)[key];
                         
                         let displayVal = val;
-                        // FORMAT DATE FOR UF (dd/mm/yy)
+                        // FORMAT DATE FOR UF (dd/mm)
                         if (key === 'uf' && val) {
                              const [year, month, day] = val.split('-');
                              if (year && month && day) {
-                                 displayVal = `${day}/${month}/${year.slice(-2)}`;
+                                 displayVal = `${day}/${month}`;
                              }
                         }
 
@@ -625,20 +656,41 @@ export const RosterGrid: React.FC<Props> = ({
                         return (
                             <div key={key} style={{ width: colWidths[key], position: isFrozen ? 'sticky' : 'relative', left: isFrozen ? left : 'auto', zIndex: isFrozen ? 30 : 'auto' }} className={`flex items-center px-2 border-r border-slate-100 overflow-hidden bg-white group-hover:bg-blue-50 ${isFrozen ? 'shadow-[2px_0_5px_rgba(0,0,0,0.05)]' : ''}`}>
                                 {canEditCell ? (
-                                    <input 
-                                        type={isUf ? "date" : "text"}
-                                        className={`w-full bg-transparent border-none text-[10px] uppercase font-medium focus:ring-1 focus:ring-blue-500 rounded px-1 min-w-0 h-full ${isUf ? 'cursor-text' : ''}`}
-                                        value={val || ''}
-                                        onChange={(e) => {
-                                             if (onUpdateEmployee) {
-                                                 onUpdateEmployee(employee.id, key === 'shiftType' ? 'shiftType' : 'lastDayOff', e.target.value);
-                                             }
-                                        }}
-                                        onKeyDown={(e) => {
-                                            e.stopPropagation();
-                                            if (e.key === 'Enter') e.currentTarget.blur();
-                                        }}
-                                    />
+                                    isUf ? (
+                                        <div className="relative w-full h-full flex items-center justify-between px-1 group/uf">
+                                            <span className={`bg-transparent border-none text-[10px] uppercase font-medium min-w-0 flex-1 ${val ? 'text-slate-600' : 'text-slate-300'}`}>
+                                                {displayVal || 'DD/MM'}
+                                            </span>
+                                            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="w-3 h-3 text-slate-400 group-hover/uf:text-blue-500 transition-colors">
+                                              <path fillRule="evenodd" d="M5.75 2a.75.75 0 01.75.75V4h7V2.75a.75.75 0 011.5 0V4h.25A2.75 2.75 0 0118 6.75v8.5A2.75 2.75 0 0115.25 18H4.75A2.75 2.75 0 012 15.25v-8.5A2.75 2.75 0 014.75 4H5V2.75A.75.75 0 015.75 2zm-1 5.5c-.69 0-1.25.56-1.25 1.25v6.5c0 .69.56 1.25 1.25 1.25h10.5c.69 0 1.25-.56 1.25-1.25v-6.5c0-.69-.56-1.25-1.25-1.25H4.75z" clipRule="evenodd" />
+                                            </svg>
+                                            <input 
+                                                type="date"
+                                                className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
+                                                value={val || ''}
+                                                onChange={(e) => {
+                                                     if (onUpdateEmployee) {
+                                                         onUpdateEmployee(employee.id, 'lastDayOff', e.target.value);
+                                                     }
+                                                }}
+                                            />
+                                        </div>
+                                    ) : (
+                                        <input 
+                                            type="text"
+                                            className="w-full bg-transparent border-none text-[10px] uppercase font-medium focus:ring-1 focus:ring-blue-500 rounded px-1 min-w-0 h-full"
+                                            value={val || ''}
+                                            onChange={(e) => {
+                                                 if (onUpdateEmployee) {
+                                                     onUpdateEmployee(employee.id, 'shiftType', e.target.value);
+                                                 }
+                                            }}
+                                            onKeyDown={(e) => {
+                                                e.stopPropagation();
+                                                if (e.key === 'Enter') e.currentTarget.blur();
+                                            }}
+                                        />
+                                    )
                                 ) : (
                                     <span className={`text-[9px] truncate uppercase font-medium ${colorClass}`} title={val}>
                                         {displayVal}
@@ -671,7 +723,9 @@ export const RosterGrid: React.FC<Props> = ({
                             </div>
                         );
                     })}
-                     <div className="w-16 flex-shrink-0 border-r border-slate-300 flex items-center justify-center text-[10px] bg-slate-50 font-bold text-slate-700">{daysOffCount}</div>
+                     <div className={`w-16 flex-shrink-0 border-r border-slate-300 flex items-center justify-center text-[10px] bg-slate-50 font-bold ${isExcessDaysOff ? 'text-red-600' : 'text-slate-700'}`}>
+                         {String(daysOffCount).padStart(2, '0')}/{String(targetDaysOff).padStart(2, '0')}
+                     </div>
                      <div className="w-10 flex-shrink-0 border-r border-slate-300 flex items-center justify-center bg-slate-50 relative group/st">
                         {validation.valid ? <span className="text-green-500 font-bold">✔</span> : (
                             <div className="relative flex justify-center w-full h-full items-center">

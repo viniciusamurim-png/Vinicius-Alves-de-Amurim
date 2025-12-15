@@ -49,7 +49,8 @@ export const ShiftManager: React.FC<Props> = ({ shifts, setShifts, onClose }) =>
       work: 'Trabalho',
       dayoff: 'Folga',
       absence: 'Ausência',
-      leave: 'Afastamento'
+      leave: 'Afastamento',
+      abono: 'Abono'
   };
 
   const handleSaveShift = () => {
@@ -122,6 +123,7 @@ export const ShiftManager: React.FC<Props> = ({ shifts, setShifts, onClose }) =>
                              <option value="dayoff">Folga</option>
                              <option value="absence">Ausência / Falta</option>
                              <option value="leave">Afastamento / Licença</option>
+                             <option value="abono">Abono</option>
                          </select>
                     </div>
                     <div className="grid grid-cols-2 gap-2">

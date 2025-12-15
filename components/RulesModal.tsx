@@ -37,8 +37,9 @@ export const RulesModal: React.FC<Props> = ({ isOpen, onClose, rules, setRules }
             </div>
 
             <div className="flex items-center justify-between border-t pt-4">
-                <div>
+                <div className="flex flex-col">
                      <label className="block text-sm font-bold text-slate-700">Preferir folga aos Domingos?</label>
+                     <span className="text-[10px] text-slate-500 italic mt-1">* Aplicável prioritariamente para colaboradoras (feminino) e escalas 6x1 ou 5x2 (Art. 386 CLT).</span>
                 </div>
                 <input 
                     type="checkbox" 

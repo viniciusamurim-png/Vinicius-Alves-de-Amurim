@@ -1,6 +1,7 @@
 
 import { GoogleGenAI, Type } from "@google/genai";
-import { Employee, Shift, MonthlySchedule, AIRulesConfig } from "../types";
+import { Employee, Shift, MonthlySchedule, AIRulesConfig, StaffingConfig } from "../types";
+import { HOLIDAYS } from "../constants";
 
 export const getDaysInMonth = (month: number, year: number) => {
   return new Date(year, month + 1, 0).getDate();
@@ -34,11 +35,40 @@ const getInitialConsecutiveDays = (lastDayOff: string | undefined, currentMonth:
     const diffTime = Math.abs(startOfMonth.getTime() - lastOffDate.getTime());
     const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
     
-    // Days worked = Total Days - 1 (the day off itself)
-    // Example: Off on 28th. Month starts 1st (30 day prev month). 29(1), 30(2). Start with 2.
-    // diffDays includes the 1st. So if 28th off, diff is 29, 30, 1st = 3 days apart.
-    // Consecutive worked before 1st = 29, 30. = 2 days.
     return Math.max(0, diffDays - 1);
+};
+
+export const calculateRequiredDaysOff = (month: number, year: number, shiftPattern: string): number => {
+    // 12x36 Rule: Technically works 15 days, rests 15 (as DSR). Plus 1 or 2 extra Folgas.
+    // For grid target purpose, let's count DSRs + 2 (approximate for fortnightly rule)
+    if (shiftPattern.includes('12x36') || shiftPattern.includes('12X36')) {
+        return Math.floor(getDaysInMonth(month, year) / 2) + 2; 
+    }
+    
+    const daysInMonth = getDaysInMonth(month, year);
+    let count = 0;
+    
+    for (let day = 1; day <= daysInMonth; day++) {
+        const date = new Date(year, month, day);
+        const dayOfWeek = date.getDay(); // 0 = Sunday, 6 = Saturday
+        const holidayKey = `${String(day).padStart(2, '0')}-${String(month + 1).padStart(2, '0')}`;
+        const isHoliday = HOLIDAYS[holidayKey] !== undefined;
+
+        if (shiftPattern.includes('5x2') || shiftPattern.includes('5X2')) {
+            // 5x2: Saturdays, Sundays AND Holidays count as required days off
+            if (dayOfWeek === 0 || dayOfWeek === 6 || isHoliday) {
+                count++;
+            }
+        } else {
+            // 6x1 (Default): Sundays AND Holidays count
+            // Note: If holiday falls on Sunday, it's just 1 day off (logic handles this as else-if usually, but here OR covers it)
+            if (dayOfWeek === 0 || isHoliday) {
+                count++;
+            }
+        }
+    }
+    
+    return count;
 };
 
 export const validateSchedule = (
@@ -64,7 +94,7 @@ export const validateSchedule = (
     
     const shift = shifts.find(s => s.id === shiftId);
     
-    // If it's a generated 'F', reset counter.
+    // If it's a generated 'F' or 'DSR', reset counter.
     if (shift && shift.isDayOff) {
       consecutiveWorkDays = 0;
     } else if (shift && !shift.isDayOff) {
@@ -101,9 +131,11 @@ export const generateAISchedule = async (
     const startDate = `${year}-${String(month + 1).padStart(2, '0')}-01`;
     const endDate = `${year}-${String(month + 1).padStart(2, '0')}-${daysInMonth}`;
 
-    // Find the shift ID for "Folga"
+    // Find shift IDs
     const folgaShift = shifts.find(s => s.code === 'F');
     const folgaId = folgaShift ? folgaShift.id : 'folga';
+    const dsrShift = shifts.find(s => s.code === 'DSR');
+    const dsrId = dsrShift ? dsrShift.id : 'dsr';
 
     let combinedAssignments: Record<string, Record<string, string>> = {};
     const totalEmployees = employees.length;
@@ -118,41 +150,46 @@ export const generateAISchedule = async (
         }
 
         const prompt = `
-          Atue como especialista em escalas de trabalho CLT e Compliance Trabalhista.
-          Gere APENAS os dias de FOLGA ("${folgaId}") para o período ${startDate} a ${endDate}.
-          Preencha APENAS quando o colaborador DEVE folgar. Deixe dias de trabalho vazios.
-
-          REGRAS RÍGIDAS (NÃO VIOLE):
-          1. Máximo de dias de trabalho consecutivos: ${rules.maxConsecutiveDays}.
-          2. Frequência de Folga aos Domingos: Pelo menos 1 domingo a cada ${rules.sundayOffFrequency} semanas.
-          3. DOBRADINHAS (Folgas Consecutivas): ${rules.preferConsecutiveDaysOff ? 'MUITO IMPORTANTE: Priorize agrupar folgas (ex: Sábado+Domingo, Domingo+Segunda) sempre que a escala permitir.' : 'NÃO é prioridade.'}
-          4. Preferência por Domingo: ${rules.preferSundayOff ? 'SIM, priorize domingos.' : 'NÃO priorize domingos.'}.
-          5. FOLGAS EXTRAS (Banco de Horas): ${rules.allowExtraDaysOff ? `SIM. Você PODE gerar até ${rules.extraDaysOffCount} dias de folga a mais do que o padrão da escala exige para abater banco de horas.` : 'NÃO gere folgas além da regra da escala.'}
-
-          CONTEXTO INICIAL (MUITO IMPORTANTE):
-          O campo 'initialConsecutiveDays' indica quantos dias o funcionário já trabalhou consecutivos vindos do mês anterior.
-          Se initialConsecutiveDays for >= 5, você DEVE dar uma folga logo no dia 01 ou 02.
-
-          PADRÕES DE ESCALA E SIGLAS NOVAS:
-          - 12x36: Trabalha 1 dia, folga o seguinte.
-          - 12x60: Trabalha 1 dia, folga os próximos 2,5 dias (essencialmente folga 2 ou 3 dias alternados, ajustando média).
-          - RADIO: Escala específica de radiologia (24 horas semanais, geralmente 2 plantões de 12h ou 4 de 6h). Priorize espaçamento.
-          - 5x2: Trabalha 5, folga 2 (Geralmente Sáb/Dom, mas ajustável).
-          - 6x1: Trabalha 6, folga 1.
+          Atue como especialista em escalas de trabalho CLT.
+          Gere os dias de FOLGA ("${folgaId}") e DESCANSO ("${dsrId}") para o período ${startDate} a ${endDate}.
           
-          *** ATENÇÃO ÀS ESCALAS "REV" (REVERSO) ***
-          - 6X1 REV e 5X2 REV: Significa que as folgas NÃO devem ser fixas em Sábado/Domingo. 
-            Para essas escalas, distribua as folgas ALEATORIAMENTE durante a semana (Seg-Sex) ou Fim de Semana, 
-            garantindo apenas que a regra de 1 Domingo a cada ${rules.sundayOffFrequency} semanas seja cumprida.
+          IMPORTANTE: Retorne APENAS os dias que NÃO são trabalho (F ou DSR). Os dias de trabalho devem ficar vazios (null).
 
-          PADRÕES DOS COLABORADORES (Lote ${Math.floor(i / BATCH_SIZE) + 1}):
+          REGRAS GERAIS:
+          1. Considere o 'initialConsecutiveDays' (dias trabalhados seguidos vindos do mês anterior).
+          2. Não deixe todos os colaboradores do mesmo setor folgarem no mesmo dia.
+          
+          REGRAS POR TIPO DE ESCALA:
+          
+          [ESCALA 12x36]
+          - Padrão Fixo: Trabalha 1 dia, Descansa 1 dia.
+          - O dia de descanso deve ser marcado como "${dsrId}".
+          - REGRA QUINZENAL: O colaborador precisa de 1 folga extra ("${folgaId}") a cada quinzena (15 dias).
+          - Essa folga extra ("${folgaId}") deve cair em um dia que SERIA de trabalho pelo padrão fixo.
+          - O resultado visual deve ser algo como: ... DSR | ${folgaId} | DSR ... (onde o F substitui um dia de trabalho).
+          
+          [ESCALA 6x1]
+          - Trabalha 6, Folga 1.
+          - Quantidade de Folgas no Mês = Número de Domingos + Número de Feriados no mês.
+          - Use "${folgaId}" para todas as folgas.
+          - Priorize domingos para mulheres.
+          - Respeite o limite de ${rules.maxConsecutiveDays} dias de trabalho seguidos.
+
+          [ESCALA 5x2]
+          - Trabalha 5, Folga 2.
+          - Quantidade de Folgas no Mês = Sábados + Domingos + Feriados.
+          - Use "${folgaId}" para todas as folgas.
+          - Normalmente folgam Sáb e Dom, mas se necessário, distribua.
+
+          COLABORADORES (Lote ${Math.floor(i / BATCH_SIZE) + 1}):
           ${JSON.stringify(batch.map(e => ({ 
               id: e.id, 
               pattern: e.shiftPattern,
+              gender: e.gender,
               initialConsecutiveDays: getInitialConsecutiveDays(e.lastDayOff, month, year)
           })))}
 
-          Retorne JSON estrito.
+          Retorne JSON estrito com array de 'schedules' contendo 'employeeId' e 'days' (array de {date, shiftId}).
         `;
 
         try {
