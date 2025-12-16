@@ -328,7 +328,7 @@ const App: React.FC = () => {
 
   return (
     <div ref={appContainerRef} className="flex flex-col h-screen w-screen bg-slate-100 overflow-hidden font-sans">
-      <header className="bg-company-blue text-white shadow-lg z-40 flex flex-col shrink-0 print:hidden w-full relative">
+      <header className="bg-company-blue text-white shadow-lg z-[90] flex flex-col shrink-0 print:hidden w-full relative">
         <div className="flex flex-col md:flex-row items-center justify-between px-4 py-2 border-b border-blue-900 w-full min-w-0 gap-2">
             <div className="flex items-center gap-4 w-full md:w-auto justify-between">
                  <div className="flex items-center gap-2">
@@ -458,7 +458,14 @@ const App: React.FC = () => {
       {showUserMgmt && <UserManagement onClose={() => setShowUserMgmt(false)} availableUnits={units} employees={employees} />}
       <GenerationScopeModal isOpen={showGenerationScope} onClose={() => setShowGenerationScope(false)} employees={filteredEmployees} onConfirm={handleConfirmGeneration} />
       <FilterManagerModal isOpen={filterManager.isOpen} onClose={() => setFilterManager({ isOpen: false, type: null })} title={filterManager.type || ''} items={filterManager.type === 'Unit' ? units : filterManager.type === 'Sector' ? sectors : shiftTypesList} setItems={filterManager.type === 'Unit' ? setUnits : filterManager.type === 'Sector' ? setSectors : setShiftTypesList} />
-      <GenerationScopeModal isOpen={clearScopeModalOpen} onClose={() => setClearScopeModalOpen(false)} employees={filteredEmployees} onConfirm={handleScopeConfirm} />
+      <GenerationScopeModal 
+        isOpen={clearScopeModalOpen} 
+        onClose={() => setClearScopeModalOpen(false)} 
+        employees={filteredEmployees} 
+        onConfirm={handleScopeConfirm} 
+        title="Selecionar para Limpar"
+        confirmText="Continuar"
+      />
       
       <ConfirmationModal 
         isOpen={showConfirmClear}
