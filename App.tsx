@@ -55,6 +55,9 @@ const App: React.FC = () => {
   const [selectedSectors, setSelectedSectors] = useState<string[]>([]);
   const [selectedShiftTypes, setSelectedShiftTypes] = useState<string[]>([]);
   const [globalSearchTerm, setGlobalSearchTerm] = useState('');
+  
+  // Active Dropdown Management
+  const [activeFilterDropdown, setActiveFilterDropdown] = useState<string | null>(null);
 
   // Rules & Config
   const [aiRules, setAiRules] = useState<AIRulesConfig>({ 
@@ -367,9 +370,36 @@ const App: React.FC = () => {
         {currentView === 'roster' && (
             <div className="bg-[#003399] px-4 py-2 flex flex-nowrap items-center gap-4 shadow-inner shrink-0 text-white z-40 relative w-full overflow-x-auto no-scrollbar">
                 <div className="flex gap-4 min-w-max">
-                    <MultiSelect label="Unidade" options={activeUnits} selected={selectedUnits} onChange={setSelectedUnits} isAdmin={isAdmin} onEdit={() => setFilterManager({ isOpen: true, type: 'Unit' })} />
-                    <MultiSelect label="Setor" options={activeSectors} selected={selectedSectors} onChange={setSelectedSectors} isAdmin={isAdmin} onEdit={() => setFilterManager({ isOpen: true, type: 'Sector' })} />
-                    <MultiSelect label="Turno" options={activeShiftTypes} selected={selectedShiftTypes} onChange={setSelectedShiftTypes} isAdmin={isAdmin} onEdit={() => setFilterManager({ isOpen: true, type: 'Shift' })} />
+                    <MultiSelect 
+                        label="Unidade" 
+                        options={activeUnits} 
+                        selected={selectedUnits} 
+                        onChange={setSelectedUnits} 
+                        isAdmin={isAdmin} 
+                        onEdit={() => setFilterManager({ isOpen: true, type: 'Unit' })} 
+                        isOpen={activeFilterDropdown === 'Unit'}
+                        onToggle={(isOpen) => setActiveFilterDropdown(isOpen ? 'Unit' : null)}
+                    />
+                    <MultiSelect 
+                        label="Setor" 
+                        options={activeSectors} 
+                        selected={selectedSectors} 
+                        onChange={setSelectedSectors} 
+                        isAdmin={isAdmin} 
+                        onEdit={() => setFilterManager({ isOpen: true, type: 'Sector' })} 
+                        isOpen={activeFilterDropdown === 'Sector'}
+                        onToggle={(isOpen) => setActiveFilterDropdown(isOpen ? 'Sector' : null)}
+                    />
+                    <MultiSelect 
+                        label="Turno" 
+                        options={activeShiftTypes} 
+                        selected={selectedShiftTypes} 
+                        onChange={setSelectedShiftTypes} 
+                        isAdmin={isAdmin} 
+                        onEdit={() => setFilterManager({ isOpen: true, type: 'Shift' })} 
+                        isOpen={activeFilterDropdown === 'Shift'}
+                        onToggle={(isOpen) => setActiveFilterDropdown(isOpen ? 'Shift' : null)}
+                    />
                 </div>
                 <div className="flex-1 flex justify-end gap-3 items-center h-full min-w-max">
                     {isGenerating && (<div className="flex flex-col justify-center min-w-[100px] mr-4 hidden lg:flex"><div className="flex justify-between text-[10px] text-blue-200 mb-1"><span>Gerando...</span><span>{generationProgress.current} / {generationProgress.total}</span></div><div className="w-full bg-blue-900 rounded-full h-2 overflow-hidden"><div className="bg-emerald-400 h-full transition-all duration-300 ease-out" style={{ width: `${(generationProgress.current / generationProgress.total) * 100}%` }}></div></div></div>)}

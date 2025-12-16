@@ -8,45 +8,59 @@ interface Props {
   onChange: (selected: string[]) => void;
   isAdmin?: boolean;
   onEdit?: () => void;
+  // Novos props para controle externo
+  isOpen?: boolean;
+  onToggle?: (isOpen: boolean) => void;
 }
 
-export const MultiSelect: React.FC<Props> = ({ label, options, selected, onChange, isAdmin, onEdit }) => {
-  const [isOpen, setIsOpen] = useState(false);
+export const MultiSelect: React.FC<Props> = ({ 
+    label, options, selected, onChange, isAdmin, onEdit,
+    isOpen: propIsOpen, onToggle 
+}) => {
+  const [internalIsOpen, setInternalIsOpen] = useState(false);
+  
+  // Determina se o componente é controlado pelo pai ou usa estado interno
+  const isControlled = propIsOpen !== undefined;
+  const isOpen = isControlled ? propIsOpen : internalIsOpen;
+
   const [search, setSearch] = useState('');
   const containerRef = useRef<HTMLDivElement>(null);
   const [dropdownStyle, setDropdownStyle] = useState<React.CSSProperties>({});
 
-  useEffect(() => {
-    const handleClickOutside = (event: MouseEvent) => {
-      if (containerRef.current && !containerRef.current.contains(event.target as Node)) {
-        // Verificar se o clique foi dentro do dropdown (que agora está no body via fixed, mas logicamente aqui)
-        // Como é difícil rastrear o elemento fixed via ref direta neste contexto simples,
-        // confiamos que se o usuário clicar fora do botão e fora do menu (tratado pelo evento de clique no menu), fecha.
-        // Mas para simplificar com fixed: fechamos ao clicar fora.
-        // Uma verificação extra para o dropdown fixed seria necessária se ele fosse complexo, 
-        // mas aqui vamos fechar se clicar em qualquer lugar e a lógica do menu impede propagação.
+  // Helper para mudar o estado (interno ou externo)
+  const setOpenState = (newState: boolean) => {
+      if (isControlled) {
+          onToggle && onToggle(newState);
+      } else {
+          setInternalIsOpen(newState);
       }
-    };
+  };
+
+  useEffect(() => {
+    const handleGlobalClick = () => setOpenState(false);
     
     // Fechar ao rolar a página para evitar que o menu flutue sozinho
     const handleScroll = () => {
-        if(isOpen) setIsOpen(false);
+        if(isOpen) setOpenState(false);
     };
 
     if (isOpen) {
-        window.addEventListener('click', () => setIsOpen(false)); // Global close
+        window.addEventListener('click', handleGlobalClick); // Global close
         window.addEventListener('scroll', handleScroll, true);
     }
     
     return () => {
-        window.removeEventListener('click', () => setIsOpen(false));
+        window.removeEventListener('click', handleGlobalClick);
         window.removeEventListener('scroll', handleScroll, true);
     };
-  }, [isOpen]);
+  }, [isOpen]); // Depende de isOpen para anexar/remover listeners corretamente
 
-  const toggleOpen = (e: React.MouseEvent) => {
+  const handleToggle = (e: React.MouseEvent) => {
       e.stopPropagation(); // Previne fechar imediatamente pelo listener global
-      if (!isOpen && containerRef.current) {
+      
+      const nextState = !isOpen;
+
+      if (nextState && containerRef.current) {
           const rect = containerRef.current.getBoundingClientRect();
           setDropdownStyle({
               position: 'fixed',
@@ -57,7 +71,7 @@ export const MultiSelect: React.FC<Props> = ({ label, options, selected, onChang
               maxHeight: '20rem'
           });
       }
-      setIsOpen(!isOpen);
+      setOpenState(nextState);
   };
 
   const toggleOption = (option: string) => {
@@ -82,8 +96,8 @@ export const MultiSelect: React.FC<Props> = ({ label, options, selected, onChang
       </div>
       
       <button 
-        onClick={toggleOpen} 
-        className="bg-blue-800 text-white text-sm border border-blue-600 rounded px-2 py-1 min-w-[160px] outline-none text-left flex justify-between items-center hover:bg-blue-700 transition-colors"
+        onClick={handleToggle} 
+        className={`bg-blue-800 text-white text-sm border border-blue-600 rounded px-2 py-1 min-w-[160px] outline-none text-left flex justify-between items-center hover:bg-blue-700 transition-colors ${isOpen ? 'ring-2 ring-blue-400' : ''}`}
       >
         <span className="truncate block max-w-[140px]">
           {selected.length === 0 ? 'TODOS' : selected.length === 1 ? selected[0] : `${selected.length} Selecionados`}
@@ -136,7 +150,7 @@ export const MultiSelect: React.FC<Props> = ({ label, options, selected, onChang
             </div>
             <div className="p-2 border-t bg-slate-50 flex justify-between rounded-b">
                 <button onClick={() => onChange([])} className="text-[10px] text-blue-600 hover:underline">Limpar</button>
-                <button onClick={() => setIsOpen(false)} className="text-[10px] text-blue-600 hover:underline">Fechar</button>
+                <button onClick={() => setOpenState(false)} className="text-[10px] text-blue-600 hover:underline">Fechar</button>
             </div>
         </div>
       )}
