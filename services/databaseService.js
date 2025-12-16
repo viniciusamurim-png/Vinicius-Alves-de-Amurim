@@ -1,7 +1,5 @@
 
-import { Employee, MonthlySchedule, Shift, AIRulesConfig, StaffingConfig, User } from '../types';
-import { INITIAL_EMPLOYEES, INITIAL_SHIFTS, INITIAL_USERS } from '../constants';
-// @ts-ignore - Ignorar erro de tipo pois estamos importando um arquivo JS puro num ambiente misto
+import { INITIAL_EMPLOYEES, INITIAL_SHIFTS, INITIAL_USERS } from '../constants.js';
 import { db } from './firebaseConfig.js';
 import { doc, getDoc, setDoc } from "firebase/firestore";
 
@@ -12,7 +10,7 @@ const SCHEDULES_COLLECTION = 'schedules';
 
 export const DatabaseService = {
     // --- EMPLOYEES ---
-    async loadEmployees(): Promise<Employee[]> {
+    async loadEmployees() {
         if (!db) return INITIAL_EMPLOYEES; // Segurança: Retorna dados locais se Firebase off
 
         try {
@@ -20,7 +18,7 @@ export const DatabaseService = {
             const docSnap = await getDoc(docRef);
 
             if (docSnap.exists()) {
-                return docSnap.data().list as Employee[];
+                return docSnap.data().list;
             } else {
                 await this.saveEmployees(INITIAL_EMPLOYEES);
                 return INITIAL_EMPLOYEES;
@@ -31,7 +29,7 @@ export const DatabaseService = {
         }
     },
 
-    async saveEmployees(employees: Employee[]): Promise<void> {
+    async saveEmployees(employees) {
         if (!db) { 
             console.warn("Salvamento ignorado: Firebase não configurado."); 
             return; 
@@ -46,7 +44,7 @@ export const DatabaseService = {
     },
 
     // --- USERS ---
-    async loadUsers(): Promise<User[]> {
+    async loadUsers() {
         if (!db) return INITIAL_USERS;
 
         try {
@@ -54,7 +52,7 @@ export const DatabaseService = {
             const docSnap = await getDoc(docRef);
 
             if (docSnap.exists()) {
-                return docSnap.data().list as User[];
+                return docSnap.data().list;
             } else {
                 await this.saveUsers(INITIAL_USERS);
                 return INITIAL_USERS;
@@ -65,7 +63,7 @@ export const DatabaseService = {
         }
     },
 
-    async saveUsers(users: User[]): Promise<void> {
+    async saveUsers(users) {
         if (!db) return;
         try {
             await setDoc(doc(db, DATA_COLLECTION, 'users'), { list: users });
@@ -75,7 +73,7 @@ export const DatabaseService = {
     },
 
     // --- SHIFTS ---
-    async loadShifts(): Promise<Shift[]> {
+    async loadShifts() {
         if (!db) return INITIAL_SHIFTS;
 
         try {
@@ -83,7 +81,7 @@ export const DatabaseService = {
             const docSnap = await getDoc(docRef);
 
             if (docSnap.exists()) {
-                return docSnap.data().list as Shift[];
+                return docSnap.data().list;
             } else {
                 await this.saveShifts(INITIAL_SHIFTS);
                 return INITIAL_SHIFTS;
@@ -94,7 +92,7 @@ export const DatabaseService = {
         }
     },
 
-    async saveShifts(shifts: Shift[]): Promise<void> {
+    async saveShifts(shifts) {
         if (!db) return;
         try {
             await setDoc(doc(db, DATA_COLLECTION, 'shifts'), { list: shifts });
@@ -104,7 +102,7 @@ export const DatabaseService = {
     },
 
     // --- SETTINGS ---
-    async loadSettings(): Promise<{ aiRules: AIRulesConfig | null, staffing: StaffingConfig | null }> {
+    async loadSettings() {
         if (!db) return { aiRules: null, staffing: null };
 
         try {
@@ -112,7 +110,7 @@ export const DatabaseService = {
             const docSnap = await getDoc(docRef);
 
             if (docSnap.exists()) {
-                return docSnap.data() as { aiRules: AIRulesConfig, staffing: StaffingConfig };
+                return docSnap.data();
             }
             return { aiRules: null, staffing: null };
         } catch (error) {
@@ -121,7 +119,7 @@ export const DatabaseService = {
         }
     },
 
-    async saveSettings(aiRules: AIRulesConfig, staffing: StaffingConfig): Promise<void> {
+    async saveSettings(aiRules, staffing) {
         if (!db) return;
         try {
             await setDoc(doc(db, DATA_COLLECTION, 'settings'), { aiRules, staffing });
@@ -131,7 +129,7 @@ export const DatabaseService = {
     },
 
     // --- MONTHLY SCHEDULES ---
-    async loadMonthlySchedule(month: number, year: number): Promise<MonthlySchedule> {
+    async loadMonthlySchedule(month, year) {
         // Retorno padrão vazio se não houver DB
         const emptySchedule = { month, year, assignments: {}, attachments: {}, comments: {} };
         if (!db) return emptySchedule;
@@ -142,7 +140,7 @@ export const DatabaseService = {
             const docSnap = await getDoc(docRef);
 
             if (docSnap.exists()) {
-                return docSnap.data() as MonthlySchedule;
+                return docSnap.data();
             }
             return emptySchedule;
         } catch (error) {
@@ -151,7 +149,7 @@ export const DatabaseService = {
         }
     },
 
-    async saveMonthlySchedule(schedule: MonthlySchedule): Promise<void> {
+    async saveMonthlySchedule(schedule) {
         if (!db) { 
             alert("Firebase não configurado! Dados não salvos na nuvem."); 
             return; 

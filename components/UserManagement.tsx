@@ -1,7 +1,7 @@
 
 import React, { useState, useEffect, useMemo } from 'react';
 import { User, Employee } from '../types';
-import { INITIAL_USERS } from '../constants';
+import { DatabaseService } from '../services/databaseService';
 
 interface Props {
   onClose: () => void;
@@ -12,6 +12,7 @@ interface Props {
 export const UserManagement: React.FC<Props> = ({ onClose, availableUnits, employees }) => {
   const [users, setUsers] = useState<User[]>([]);
   const [editingId, setEditingId] = useState<string | null>(null);
+  const [isLoading, setIsLoading] = useState(false);
   const [formData, setFormData] = useState({ 
       username: '', 
       password: '', 
@@ -22,12 +23,13 @@ export const UserManagement: React.FC<Props> = ({ onClose, availableUnits, emplo
   });
 
   useEffect(() => {
-    const stored = localStorage.getItem('APP_USERS');
-    if (stored) {
-        setUsers(JSON.parse(stored));
-    } else {
-        setUsers(INITIAL_USERS);
+    const load = async () => {
+        setIsLoading(true);
+        const data = await DatabaseService.loadUsers();
+        setUsers(data);
+        setIsLoading(false);
     }
+    load();
   }, []);
 
   // Derive available sectors ONLY from the selected Allowed Units
@@ -38,12 +40,14 @@ export const UserManagement: React.FC<Props> = ({ onClose, availableUnits, emplo
       return Array.from(sectors).filter(Boolean).sort();
   }, [employees, formData.allowedUnits]);
 
-  const saveUsers = (newUsers: User[]) => {
+  const saveUsers = async (newUsers: User[]) => {
+      setIsLoading(true);
       setUsers(newUsers);
-      localStorage.setItem('APP_USERS', JSON.stringify(newUsers));
+      await DatabaseService.saveUsers(newUsers);
+      setIsLoading(false);
   };
 
-  const handleSave = () => {
+  const handleSave = async () => {
       if (!formData.username || !formData.password) return;
       
       const newUser: User = {
@@ -56,11 +60,14 @@ export const UserManagement: React.FC<Props> = ({ onClose, availableUnits, emplo
           allowedSectors: formData.role === 'admin' ? [] : formData.allowedSectors
       };
 
+      let updatedList = [];
       if (editingId) {
-          saveUsers(users.map(u => u.id === editingId ? newUser : u));
+          updatedList = users.map(u => u.id === editingId ? newUser : u);
       } else {
-          saveUsers([...users, newUser]);
+          updatedList = [...users, newUser];
       }
+      
+      await saveUsers(updatedList);
       resetForm();
   };
 
@@ -81,13 +88,13 @@ export const UserManagement: React.FC<Props> = ({ onClose, availableUnits, emplo
       setFormData({ username: '', password: '', name: '', role: 'viewer', allowedUnits: [], allowedSectors: [] });
   }
 
-  const handleRemove = (id: string) => {
+  const handleRemove = async (id: string) => {
       if(id === 'admin') {
           alert('Não é possível remover o super admin.');
           return;
       }
       if(confirm('Tem certeza que deseja excluir este usuário?')) {
-          saveUsers(users.filter(u => u.id !== id));
+          await saveUsers(users.filter(u => u.id !== id));
           if (editingId === id) resetForm();
       }
   };
@@ -125,7 +132,7 @@ export const UserManagement: React.FC<Props> = ({ onClose, availableUnits, emplo
                  <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
                     <path fillRule="evenodd" d="M10 9a3 3 0 100-6 3 3 0 000 6zm-7 9a7 7 0 1114 0H3z" clipRule="evenodd" />
                  </svg>
-                 Gerenciar Usuários e Permissões
+                 Gerenciar Usuários e Permissões (Nuvem)
              </h3>
              <button onClick={onClose} className="text-slate-400 hover:text-red-500">X</button>
           </div>
@@ -203,8 +210,8 @@ export const UserManagement: React.FC<Props> = ({ onClose, availableUnits, emplo
                     </div>
                 )}
 
-                <button onClick={handleSave} className="w-full bg-green-600 text-white font-bold py-2 rounded hover:bg-green-700 mt-2 uppercase text-xs">
-                    {editingId ? 'Atualizar Usuário' : 'Adicionar Usuário'}
+                <button onClick={handleSave} disabled={isLoading} className="w-full bg-green-600 text-white font-bold py-2 rounded hover:bg-green-700 mt-2 uppercase text-xs disabled:opacity-50">
+                    {isLoading ? 'Salvando...' : (editingId ? 'Atualizar Usuário' : 'Adicionar Usuário')}
                 </button>
              </div>
 
