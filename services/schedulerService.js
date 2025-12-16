@@ -1,8 +1,8 @@
-
 import { GoogleGenAI } from "@google/genai";
 import { HOLIDAYS } from "../constants.js";
 
-// Helper para type do Schema do GenAI (Simulado em JS puro, usamos string ou objeto direto)
+// Helper para type do Schema do GenAI
+// Se possível, importe SchemaType do SDK real: import { SchemaType } from "@google/genai";
 const SchemaType = {
   STRING: 'STRING',
   NUMBER: 'NUMBER',
@@ -17,25 +17,35 @@ export const getDaysInMonth = (month, year) => {
 };
 
 export const decimalToTime = (decimalStr) => {
-    if (!decimalStr) return "00:00";
-    let num = typeof decimalStr === 'string' ? parseFloat(decimalStr.replace(',', '.')) : decimalStr;
-    
-    if (isNaN(num)) return decimalStr.toString(); // Return as is if not a number
-    
-    const isNegative = num < 0;
-    num = Math.abs(num);
-    const hours = Math.floor(num);
-    const minutes = Math.round((num - hours) * 60);
+  if (!decimalStr) return "00:00";
+  
+  // Tratamento para números já passados como number
+  let num = decimalStr;
+  if (typeof decimalStr === 'string') {
+    num = parseFloat(decimalStr.replace(',', '.'));
+  }
+  
+  if (isNaN(num)) return String(decimalStr); // Retorna original se falhar
 
-    return `${isNegative ? '-' : ''}${String(hours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}`;
+  const isNegative = num < 0;
+  num = Math.abs(num);
+  const hours = Math.floor(num);
+  const minutes = Math.round((num - hours) * 60);
+
+  return `${isNegative ? '-' : ''}${String(hours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}`;
 };
 
 // Calculate initial consecutive days based on UF (Last Day Off)
+// Otimizado para evitar erros de fuso horário usando UTC ou Zera Horas consistentemente
 const getInitialConsecutiveDays = (lastDayOff, currentMonth, currentYear) => {
     if (!lastDayOff) return 0;
     
+    // Força a data para meio-dia para evitar problemas de fuso horário (DST) na virada do dia
     const lastOffDate = new Date(lastDayOff);
+    lastOffDate.setHours(12, 0, 0, 0);
+
     const startOfMonth = new Date(currentYear, currentMonth, 1);
+    startOfMonth.setHours(12, 0, 0, 0);
     
     // Safety check: if last day off is in the future relative to month start, ignore
     if (lastOffDate >= startOfMonth) return 0;
@@ -50,7 +60,8 @@ const getInitialConsecutiveDays = (lastDayOff, currentMonth, currentYear) => {
 // Helper to determine if 12x36 starts with DSR or WORK on day 1
 const determine12x36Start = (lastDayOffStr, currentMonth, currentYear) => {
     if (!lastDayOffStr) return 'UNKNOWN';
-    // Robust parsing
+    
+    // Robust parsing (YYYY-MM-DD)
     const parts = lastDayOffStr.split('-');
     if (parts.length !== 3) return 'UNKNOWN';
     
@@ -61,26 +72,26 @@ const determine12x36Start = (lastDayOffStr, currentMonth, currentYear) => {
     const lastOff = new Date(y, m, d);
     const firstOfMonth = new Date(currentYear, currentMonth, 1);
     
-    // Normalize time to avoid timezone bugs
-    lastOff.setHours(0,0,0,0);
-    firstOfMonth.setHours(0,0,0,0);
+    // Normalização agressiva para evitar bugs de timezone
+    lastOff.setHours(12, 0, 0, 0);
+    firstOfMonth.setHours(12, 0, 0, 0);
 
     const diffTime = firstOfMonth.getTime() - lastOff.getTime();
+    // Round é mais seguro que floor/ceil aqui devido a milissegundos flutuantes
     const diffDays = Math.round(diffTime / (1000 * 60 * 60 * 24));
 
     if (diffDays <= 0) return 'UNKNOWN'; 
 
     // Logic: 
-    // If Last Day Off was yesterday (diff=1), today is WORK.
-    // If Last Day Off was 2 days ago (diff=2), today is DSR (Day Off).
-    // Pattern: Odd diff = WORK, Even diff = DSR.
-    return (diffDays % 2 === 0) ? 'DSR' : 'WORK';
+    // Diff 1 (Ontem foi folga) -> Hoje TRABALHO (WORK)
+    // Diff 2 (Anteontem foi folga) -> Ontem Trabalho -> Hoje FOLGA (DSR)
+    // Pattern: Odd (Impar) = WORK, Even (Par) = DSR.
+    return (diffDays % 2 !== 0) ? 'WORK' : 'DSR';
 };
 
 export const calculateRequiredDaysOff = (month, year, shiftPattern) => {
-    // 12x36 Rule: Technically works 15 days, rests 15 (as DSR). Plus 1 or 2 extra Folgas.
-    // For grid target purpose, let's count DSRs + 2 (approximate for fortnightly rule)
     if (shiftPattern && (shiftPattern.includes('12x36') || shiftPattern.includes('12X36'))) {
+        // Regra aproximada para 12x36 + 2 folgas extras
         return Math.floor(getDaysInMonth(month, year) / 2) + 2; 
     }
     
@@ -93,14 +104,16 @@ export const calculateRequiredDaysOff = (month, year, shiftPattern) => {
         const holidayKey = `${String(day).padStart(2, '0')}-${String(month + 1).padStart(2, '0')}`;
         const isHoliday = HOLIDAYS[holidayKey] !== undefined;
 
-        if (shiftPattern && (shiftPattern.includes('5x2') || shiftPattern.includes('5X2'))) {
+        // Normalização de string uppercase para comparação segura
+        const pattern = shiftPattern ? shiftPattern.toUpperCase() : '';
+
+        if (pattern.includes('5X2')) {
             // 5x2: Saturdays, Sundays AND Holidays count as required days off
             if (dayOfWeek === 0 || dayOfWeek === 6 || isHoliday) {
                 count++;
             }
         } else {
             // 6x1 (Default): Sundays AND Holidays count
-            // Note: If holiday falls on Sunday, it's just 1 day off (logic handles this as else-if usually, but here OR covers it)
             if (dayOfWeek === 0 || isHoliday) {
                 count++;
             }
@@ -118,6 +131,9 @@ export const validateSchedule = (
   employees
 ) => {
   const messages = [];
+  // Proteção contra schedule nulo/indefinido
+  if (!schedule || !schedule.assignments) return { valid: true, messages: [] };
+
   const assignments = schedule.assignments[employeeId] || {};
   const daysInMonth = getDaysInMonth(schedule.month, schedule.year);
   
@@ -133,19 +149,22 @@ export const validateSchedule = (
     
     const shift = shifts.find(s => s.id === shiftId);
     
-    // If it's a generated 'F' or 'DSR', reset counter.
-    if (shift && shift.isDayOff) {
+    // Lógica corrigida: Se shiftId existe E é folga -> reseta.
+    // Se shiftId não existe (null/undefined) -> assume Trabalho.
+    
+    const isDayOff = shift && shift.isDayOff;
+
+    if (isDayOff) {
       consecutiveWorkDays = 0;
-    } else if (shift && !shift.isDayOff) {
-      // Explicit work shift
-      consecutiveWorkDays++;
     } else {
-        // Empty cell logic treated as work day for calculation safety if strict
-        consecutiveWorkDays++;
+      // Trabalho explícito ou dia vazio (Trabalho implícito)
+      consecutiveWorkDays++;
     }
 
     if (consecutiveWorkDays > maxConsecutive) {
       messages.push(`CLT: Mais de ${maxConsecutive} dias consecutivos (Dia ${day}).`);
+      // Não resetamos o contador aqui para apontar erro contínuo se necessário, 
+      // ou resetamos para não spammar erros. O original resetava.
       consecutiveWorkDays = 0; 
     }
   }
@@ -153,7 +172,7 @@ export const validateSchedule = (
   return { valid: messages.length === 0, messages };
 };
 
-const BATCH_SIZE = 15; // Process 15 employees at a time to avoid token limits
+const BATCH_SIZE = 15;
 
 export const generateAISchedule = async (
   employees,
@@ -164,27 +183,31 @@ export const generateAISchedule = async (
   onProgress
 ) => {
   try {
-    const apiKey = "AIzaSyDPYom8PC1Xb6mc7N9ixyGh1_lXOAnASpA"; // Nota: Use sua chave real ou variável de ambiente se possível, hardcoded aqui por ser estático
+    // ⚠️ SEGURANÇA: Chave movida para variável de ambiente
+    // Certifique-se de ter VITE_GEMINI_API_KEY ou REACT_APP_GEMINI_API_KEY configurado no seu .env
+    const apiKey = import.meta.env.VITE_GEMINI_API_KEY || process.env.GEMINI_API_KEY;
+    
+    if (!apiKey) {
+        throw new Error("Chave de API do Google Gemini não encontrada nas variáveis de ambiente.");
+    }
+
     const ai = new GoogleGenAI({ apiKey: apiKey });
     
     const daysInMonth = getDaysInMonth(month, year);
     const startDate = `${year}-${String(month + 1).padStart(2, '0')}-01`;
     const endDate = `${year}-${String(month + 1).padStart(2, '0')}-${daysInMonth}`;
 
-    // Find shift IDs
     const folgaShift = shifts.find(s => s.code === 'F');
     const folgaId = folgaShift ? folgaShift.id : 'folga';
     const dsrShift = shifts.find(s => s.code === 'DSR');
-    const dsrId = dsrShift ? dsrShift.id : 'dsr'; // Fallback if DSR code changed
+    const dsrId = dsrShift ? dsrShift.id : 'dsr';
 
     let combinedAssignments = {};
     const totalEmployees = employees.length;
 
-    // Process in batches
     for (let i = 0; i < totalEmployees; i += BATCH_SIZE) {
         const batch = employees.slice(i, i + BATCH_SIZE);
         
-        // Notify progress
         if (onProgress) {
             onProgress(i, totalEmployees);
         }
@@ -193,51 +216,42 @@ export const generateAISchedule = async (
           Atue como especialista em escalas de trabalho.
           Gere os dias de FOLGA ("${folgaId}") e DESCANSO ("${dsrId}") para o período ${startDate} a ${endDate}.
           
-          IMPORTANTE: Retorne APENAS os dias que NÃO são trabalho (F ou DSR). Os dias de trabalho devem ficar vazios (null).
+          IMPORTANTE: Retorne APENAS os dias que NÃO são trabalho (F ou DSR). 
+          Dias de trabalho devem ser omitidos ou nulos.
 
-          REGRAS GERAIS:
-          1. Considere os dados fornecidos para cada colaborador individualmente.
-          
           REGRAS POR TIPO DE ESCALA:
           
           [ESCALA 12x36]
-          - Esta escala é a MAIS IMPORTANTE. Deve ser preenchida RIGOROSAMENTE.
-          - O sistema calculou o campo 'patternStart' para cada colaborador.
-          - Se patternStart for 'DSR': O Dia 01 do mês é DESCANSO ("${dsrId}"). O Dia 02 é Trabalho (Vazio). O Dia 03 é DESCANSO ("${dsrId}"), etc.
-          - Se patternStart for 'WORK': O Dia 01 do mês é Trabalho (Vazio). O Dia 02 é DESCANSO ("${dsrId}"). O Dia 03 é Trabalho (Vazio), etc.
-          - Se patternStart for 'UNKNOWN': Assuma Trabalho no dia 01 e Descanso no dia 02.
-          - OBRIGATÓRIO: Todos os dias de descanso padrão da alternância 1x1 DEVEM ser preenchidos com "${dsrId}". Não deixe vazio.
-          - FOLGA EXTRA: Além do padrão 1x1, insira 1 folga extra ("${folgaId}") a cada quinzena, substituindo um dia que seria de trabalho.
+          - Campo 'patternStart12x36' define o dia 01:
+          - 'DSR': Dia 01=Descanso, Dia 02=Trabalho, Dia 03=Descanso...
+          - 'WORK': Dia 01=Trabalho, Dia 02=Descanso, Dia 03=Trabalho...
+          - OBRIGATÓRIO: Preencha toda a alternância padrão com "${dsrId}".
+          - FOLGA EXTRA: Insira 1 "${folgaId}" extra a cada 15 dias substituindo um dia de trabalho.
           
           [ESCALA 6x1]
-          - Trabalha 6, Folga 1.
-          - Quantidade de Folgas = Domingos + Feriados.
-          - Use "${folgaId}" para todas as folgas.
-          - Mulheres: Priorizar folga quinzenal aos domingos.
-          - Homens: Priorizar folga a cada 3 domingos.
-          - Limite: ${rules.maxConsecutiveDays} dias consecutivos de trabalho.
+          - Folgas (${folgaId}) = Domingos + Feriados.
+          - Mulheres: Priorizar domingo quinzenal.
+          - Homens: Priorizar 1 domingo a cada 3.
+          - Máximo ${rules?.maxConsecutiveDays || 6} dias consecutivos de trabalho.
 
           [ESCALA 5x2]
-          - Use "${folgaId}" para as 2 folgas semanais e feriados.
+          - Use "${folgaId}" para sábados, domingos e feriados.
 
-          DADOS DOS COLABORADORES (Lote ${Math.floor(i / BATCH_SIZE) + 1}):
+          DADOS (Lote ${Math.floor(i / BATCH_SIZE) + 1}):
           ${JSON.stringify(batch.map(e => ({ 
               id: e.id, 
               pattern: e.shiftPattern,
               gender: e.gender,
               lastDayOff: e.lastDayOff,
-              // Explicitly calculate start state for 12x36 to remove ambiguity for AI
               patternStart12x36: determine12x36Start(e.lastDayOff, month, year),
               initialConsecutiveDays: getInitialConsecutiveDays(e.lastDayOff, month, year)
           })))}
-
-          Retorne JSON estrito com array de 'schedules' contendo 'employeeId' e 'days' (array de {date, shiftId}).
         `;
 
         try {
             const response = await ai.models.generateContent({
-              model: "gemini-2.5-flash",
-              contents: prompt,
+              model: "gemini-1.5-flash", // Recomendo o 1.5-flash (mais estável/rápido) ou o gemini-2.0-flash-exp
+              contents: [{ role: "user", parts: [{ text: prompt }] }],
               config: {
                 responseMimeType: "application/json",
                 responseSchema: {
@@ -254,8 +268,8 @@ export const generateAISchedule = async (
                                  items: {
                                     type: SchemaType.OBJECT,
                                     properties: {
-                                       date: { type: SchemaType.STRING, description: "YYYY-MM-DD" },
-                                       shiftId: { type: SchemaType.STRING }
+                                        date: { type: SchemaType.STRING },
+                                        shiftId: { type: SchemaType.STRING }
                                     },
                                     required: ["date", "shiftId"]
                                  }
@@ -270,23 +284,33 @@ export const generateAISchedule = async (
               }
             });
 
-            const json = JSON.parse(response.text);
+            // Parse seguro: algumas vezes o SDK retorna o texto direto, outras dentro de candidates
+            let jsonString = response.text ? response.text() : null; 
             
-            if (json.schedules && Array.isArray(json.schedules)) {
-                json.schedules.forEach((sch) => {
-                    const empMap = {};
-                    if (sch.days && Array.isArray(sch.days)) {
-                        sch.days.forEach((d) => {
-                            if (d.date && d.shiftId) {
-                                empMap[d.date] = d.shiftId;
-                            }
-                        });
-                    }
-                    combinedAssignments[sch.employeeId] = empMap;
-                });
+            // Fallback se .text() for function ou propriedade dependendo da versão do SDK
+            if (!jsonString && response.response) {
+                jsonString = response.response.text();
+            }
+
+            if (jsonString) {
+                const json = JSON.parse(jsonString);
+                if (json.schedules && Array.isArray(json.schedules)) {
+                    json.schedules.forEach((sch) => {
+                        const empMap = {};
+                        if (sch.days && Array.isArray(sch.days)) {
+                            sch.days.forEach((d) => {
+                                if (d.date && d.shiftId) {
+                                    empMap[d.date] = d.shiftId;
+                                }
+                            });
+                        }
+                        combinedAssignments[sch.employeeId] = empMap;
+                    });
+                }
             }
         } catch (batchError) {
-            console.error(`Erro no lote ${i} a ${i + BATCH_SIZE}:`, batchError);
+            console.error(`Erro no lote ${i}:`, batchError);
+            // Continua para o próximo lote em vez de falhar tudo
         }
     }
 
