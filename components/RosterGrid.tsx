@@ -44,6 +44,13 @@ interface DailyStat {
   roleIdeals: Record<string, number>;
 }
 
+// Pequeno ícone de calendário
+const CalendarIconMini = () => (
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="w-3 h-3 text-blue-500 hover:text-blue-700 cursor-pointer">
+        <path fillRule="evenodd" d="M5.75 2a.75.75 0 01.75.75V4h7V2.75a.75.75 0 011.5 0V4h.25A2.75 2.75 0 0118 6.75v8.5A2.75 2.75 0 0115.25 18H4.75A2.75 2.75 0 012 15.25v-8.5A2.75 2.75 0 014.75 4H5V2.75A.75.75 0 015.75 2zm-1 5.5c-.69 0-1.25.56-1.25 1.25v6.5c0 .69.56 1.25 1.25 1.25h10.5c.69 0 1.25-.56 1.25-1.25v-6.5c0-.69-.56-1.25-1.25-1.25H4.75z" clipRule="evenodd" />
+    </svg>
+);
+
 export const RosterGrid: React.FC<Props> = ({ 
     employees, shifts, currentSchedule, setSchedule, rules, staffingConfig, 
     onReorderEmployees, onUpdateEmployee, isReadOnly = false, onUndo, onRedo, currentUserId
@@ -60,15 +67,19 @@ export const RosterGrid: React.FC<Props> = ({
   const [sortConfig, setSortConfig] = useState<{ key: ExtendedColumnKey | null, direction: 'asc' | 'desc' }>({ key: null, direction: 'asc' });
   const [draggedEmployeeId, setDraggedEmployeeId] = useState<string | null>(null);
 
+  // Editing State for Left Columns (ShiftType, UF)
+  const [editingLeftCell, setEditingLeftCell] = useState<{ id: string, key: ExtendedColumnKey, value: string } | null>(null);
+
   // --- VIRTUALIZATION STATE ---
   const [scrollTop, setScrollTop] = useState(0);
   const [containerHeight, setContainerHeight] = useState(600); // Default, updated by resize observer
 
   // User Preferences
   const [hiddenColumns, setHiddenColumns] = useState<ExtendedColumnKey[]>([]);
-  const [frozenColumns, setFrozenColumns] = useState<ExtendedColumnKey[]>(['name']);
+  // Mantendo 'name' congelado
+  const [frozenColumns, setFrozenColumns] = useState<ExtendedColumnKey[]>(['name']); 
   const [colWidths, setColWidths] = useState<Record<ExtendedColumnKey, number>>({
-      name: 220, id: 80, role: 120, cpf: 100, scale: 60, time: 80, shiftType: 100, position: 80, council: 100, bh: 60, uf: 95
+      name: 220, id: 80, role: 120, cpf: 100, scale: 60, time: 80, shiftType: 110, position: 80, council: 100, bh: 60, uf: 100
   });
 
   // Load Prefs
@@ -147,8 +158,9 @@ export const RosterGrid: React.FC<Props> = ({
   const paddingTop = startIndex * ROW_HEIGHT;
   const paddingBottom = (totalRows - endIndex) * ROW_HEIGHT;
 
-
-  const orderedKeys: ExtendedColumnKey[] = ['name', 'id', 'role', 'cpf', 'scale', 'time', 'shiftType', 'position', 'council', 'bh', 'uf'];
+  // Define Columns Order (Reorganized: Turno after Horário, UF after BH)
+  const orderedKeys: ExtendedColumnKey[] = ['name', 'scale', 'role', 'id', 'cpf', 'time', 'shiftType', 'position', 'council', 'bh', 'uf'];
+  
   const visibleColumns = useMemo(() => orderedKeys.filter(k => !hiddenColumns.includes(k)), [hiddenColumns]);
   const totalLeftWidth = visibleColumns.reduce((acc, key) => acc + colWidths[key], 0);
 
@@ -166,10 +178,15 @@ export const RosterGrid: React.FC<Props> = ({
     const handleBackgroundClick = (e: MouseEvent) => {
       if (gridContainerRef.current && gridContainerRef.current.contains(e.target as Node)) {
           const target = e.target as HTMLElement;
+          // Close editing left cell if clicked outside
+          if (!target.classList.contains('editable-cell-input')) {
+              setEditingLeftCell(null);
+          }
           if (target === gridContainerRef.current || target.classList.contains('roster-bg')) {
              setSelection(null); setFocusedCell(null); setContextMenu(prev => ({...prev, visible: false}));
           }
       } else {
+          setEditingLeftCell(null);
           setContextMenu(prev => ({...prev, visible: false}));
       }
     };
@@ -195,9 +212,55 @@ export const RosterGrid: React.FC<Props> = ({
   const handleMouseEnter = (rowIndex: number, day: number) => { if (isSelecting && selection) setSelection({ ...selection, endRow: rowIndex, endCol: day }); };
   const handleMouseUp = () => setIsSelecting(false);
 
+  // --- LEFT COLUMN EDITING LOGIC ---
+  const handleLeftCellClick = (id: string, key: ExtendedColumnKey, currentValue: string) => {
+      if (isReadOnly) return;
+      if (key === 'shiftType' || key === 'uf') {
+          // Format UF for display/editing
+          let val = currentValue;
+          if (key === 'uf' && val) {
+             const [y, m, d] = val.split('-');
+             if (y && m && d) val = `${d}/${m}`;
+          }
+          setEditingLeftCell({ id, key, value: val });
+      }
+  };
+
+  const handleLeftCellSave = () => {
+      if (!editingLeftCell || !onUpdateEmployee) return;
+      
+      let finalValue = editingLeftCell.value;
+
+      // UF Parser (DD/MM -> YYYY-MM-DD)
+      if (editingLeftCell.key === 'uf') {
+         // Regex match simple DD/MM
+         if (/^\d{1,2}\/\d{1,2}$/.test(finalValue)) {
+            const [d, m] = finalValue.split('/');
+            // Use current schedule year
+            finalValue = `${currentSchedule.year}-${m.padStart(2, '0')}-${d.padStart(2, '0')}`;
+         } else if (finalValue.trim() === '') {
+             finalValue = '';
+         } else if (!/^\d{4}-\d{2}-\d{2}$/.test(finalValue)) {
+             // If not ISO and not DD/MM, revert (or handle error, here we keep old valid or empty)
+             // For simplicity, we assume valid input or it saves garbage which validates elsewhere
+         }
+         onUpdateEmployee(editingLeftCell.id, 'lastDayOff', finalValue);
+      } else {
+         // ShiftType (Turno)
+         onUpdateEmployee(editingLeftCell.id, editingLeftCell.key, finalValue);
+      }
+
+      setEditingLeftCell(null);
+  };
+
+  const handleDateIconChange = (e: React.ChangeEvent<HTMLInputElement>, id: string) => {
+      if (onUpdateEmployee) {
+          onUpdateEmployee(id, 'lastDayOff', e.target.value);
+      }
+  };
+
   // Stats
   const dailyStats = useMemo<DailyStat[]>(() => {
-      // Calculation optimized to only loop active data (could be optimized further but usually fast enough)
       return daysArray.map(day => {
           const date = new Date(currentSchedule.year, currentSchedule.month, day);
           const dayKeys = ['sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday'];
@@ -279,13 +342,66 @@ export const RosterGrid: React.FC<Props> = ({
                     {/* Left Cols */}
                     <div className="flex-shrink-0 flex border-r border-slate-300 bg-white z-10 group-hover:bg-blue-50">
                         {visibleColumns.map(key => {
-                            let val = key === 'scale' ? employee.shiftPattern : key === 'time' ? employee.workTime : key === 'position' ? employee.positionNumber : key === 'council' ? employee.categoryCode : key === 'bh' ? employee.bankHoursBalance : key === 'uf' ? employee.lastDayOff : (employee as any)[key];
-                            if (key === 'uf' && val) { const [y, m, d] = val.split('-'); if (y && m && d) val = `${d}/${m}`; }
-                            const colorClass = key === 'bh' ? (val && val.startsWith('-') ? 'text-red-600' : 'text-green-600 font-bold') : 'text-slate-500';
+                            let rawValue = key === 'scale' ? employee.shiftPattern : key === 'time' ? employee.workTime : key === 'position' ? employee.positionNumber : key === 'council' ? employee.categoryCode : key === 'bh' ? employee.bankHoursBalance : key === 'uf' ? employee.lastDayOff : (employee as any)[key];
+                            
+                            // Display Formatter
+                            let displayValue = rawValue;
+                            if (key === 'uf' && rawValue) { 
+                                const [y, m, d] = rawValue.split('-'); 
+                                if (y && m && d) displayValue = `${d}/${m}`; 
+                            }
+
+                            let colorClass = 'text-slate-500';
+                            if (key === 'bh') {
+                                colorClass = (displayValue && displayValue.startsWith('-') ? 'text-red-600' : 'text-green-600 font-bold');
+                            } else if (key === 'shiftType' || key === 'uf') {
+                                colorClass = 'text-black font-bold';
+                            }
+                            
                             const isFrozen = frozenColumns.includes(key); const left = getStickyLeft(key);
+                            
+                            // Editing State Check
+                            const isEditing = editingLeftCell?.id === employee.id && editingLeftCell.key === key;
+
+                            // Special Render for UF
+                            const isUF = key === 'uf';
+                            const isShiftType = key === 'shiftType';
+                            const canEdit = !isReadOnly && (isUF || isShiftType);
+
                             return (
-                                <div key={key} style={{ width: colWidths[key], position: isFrozen ? 'sticky' : 'relative', left: isFrozen ? left : 'auto', zIndex: isFrozen ? 30 : 'auto' }} className={`flex items-center px-2 border-r border-slate-100 overflow-hidden bg-white group-hover:bg-blue-50 ${isFrozen ? 'shadow-[2px_0_5px_rgba(0,0,0,0.05)]' : ''}`}>
-                                    <span className={`text-[9px] truncate uppercase font-medium ${colorClass}`} title={val}>{val}</span>
+                                <div 
+                                    key={key} 
+                                    style={{ width: colWidths[key], position: isFrozen ? 'sticky' : 'relative', left: isFrozen ? left : 'auto', zIndex: isFrozen ? 30 : 'auto' }} 
+                                    className={`flex items-center px-2 border-r border-slate-100 overflow-hidden bg-white group-hover:bg-blue-50 ${isFrozen ? 'shadow-[2px_0_5px_rgba(0,0,0,0.05)]' : ''} ${canEdit ? 'cursor-text hover:bg-yellow-50' : ''}`}
+                                    onClick={() => handleLeftCellClick(employee.id, key, rawValue)}
+                                >
+                                    {isEditing ? (
+                                        <input 
+                                            autoFocus
+                                            className="w-full text-[10px] border border-blue-400 rounded px-1 py-0.5 outline-none editable-cell-input bg-white z-50 uppercase"
+                                            value={editingLeftCell.value}
+                                            onChange={(e) => setEditingLeftCell({...editingLeftCell, value: e.target.value})}
+                                            onBlur={handleLeftCellSave}
+                                            onKeyDown={(e) => { if(e.key === 'Enter') handleLeftCellSave(); }}
+                                        />
+                                    ) : (
+                                        <div className="flex items-center justify-between w-full">
+                                            <span className={`text-[9px] truncate uppercase font-medium ${colorClass}`} title={displayValue}>{displayValue}</span>
+                                            {isUF && !isReadOnly && (
+                                                <div className="relative flex items-center" onClick={(e) => e.stopPropagation()}>
+                                                    <div className="opacity-60 hover:opacity-100 transition-opacity p-1">
+                                                        <CalendarIconMini />
+                                                    </div>
+                                                    <input 
+                                                        type="date" 
+                                                        className="absolute inset-0 opacity-0 cursor-pointer w-full h-full"
+                                                        value={rawValue || ''}
+                                                        onChange={(e) => handleDateIconChange(e, employee.id)}
+                                                    />
+                                                </div>
+                                            )}
+                                        </div>
+                                    )}
                                 </div>
                             )
                         })}
