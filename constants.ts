@@ -1,5 +1,7 @@
 
-export const INITIAL_USERS = [
+import { Employee, Shift, User } from './types';
+
+export const INITIAL_USERS: User[] = [
   { id: 'admin', username: 'admin', password: '123', name: 'Administrador Master', role: 'admin' }
 ];
 
@@ -13,7 +15,7 @@ export const COMMENTS_OPTIONS = [
     "Troca de Plantão"
 ];
 
-export const INITIAL_EMPLOYEES = [
+export const INITIAL_EMPLOYEES: Employee[] = [
   { 
     id: '62036630', name: 'CAMILA CAIRES ALQUIMIM', role: 'ENFERMEIRO LIDER', unit: 'Unidade Central', sector: 'UTI', contractType: 'CLT',
     cpf: '123.456.789-00', positionNumber: '14009423', categoryCode: 'ENF-1234', shiftPattern: '5x2', bankHoursBalance: '10:00', shiftType: 'DIURNO',
@@ -40,7 +42,7 @@ export const INITIAL_EMPLOYEES = [
   },
 ];
 
-export const INITIAL_SHIFTS = [
+export const INITIAL_SHIFTS: Shift[] = [
   // --- FOLGAS E DESCANSO (ESSENCIAIS) ---
   { id: 'folga', code: 'F', name: 'Folga', category: 'dayoff', startTime: '', endTime: '', color: 'bg-green-100', textColor: 'text-green-800', isDayOff: true },
   { id: 'dsr', code: 'DSR', name: 'Descanso Semanal', category: 'dayoff', startTime: '', endTime: '', color: 'bg-gray-100', textColor: 'text-gray-600', isDayOff: true },
@@ -87,7 +89,7 @@ export const INITIAL_UNITS = ['Unidade Central', 'Unidade Sul', 'Unidade Norte',
 export const INITIAL_SECTORS = ['UTI', 'Pediatria', 'Emergência', 'Recepção', 'Diagnóstico', 'Enfermagem'];
 export const INITIAL_SHIFT_TYPES = ['DIURNO', 'NOTURNO', 'MISTO', 'ADMINISTRATIVO'];
 
-export const HOLIDAYS = {
+export const HOLIDAYS: Record<string, string> = {
   "01-01": "Confraternização Universal",
   "21-04": "Tiradentes",
   "01-05": "Dia do Trabalho",

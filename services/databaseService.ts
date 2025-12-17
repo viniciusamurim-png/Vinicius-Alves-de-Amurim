@@ -1,169 +1,76 @@
 
-import { Employee, MonthlySchedule, Shift, AIRulesConfig, StaffingConfig, User } from '../types';
-import { INITIAL_EMPLOYEES, INITIAL_SHIFTS, INITIAL_USERS } from '../constants';
-// @ts-ignore - Ignorar erro de tipo pois estamos importando um arquivo JS puro num ambiente misto
-import { db } from './firebaseConfig.js';
-import { doc, getDoc, setDoc } from "firebase/firestore";
+import { Employee, MonthlySchedule, Shift, AIRulesConfig, StaffingConfig } from '../types';
+import { INITIAL_EMPLOYEES, INITIAL_SHIFTS } from '../constants';
 
-// Coleção principal para dados globais da empresa
-const DATA_COLLECTION = 'company_data';
-// Coleção para escalas mensais
-const SCHEDULES_COLLECTION = 'schedules';
+// Keys Prefix
+const DB_PREFIX = 'DB_v1_';
+
+// "Tables"
+const TBL_EMPLOYEES = `${DB_PREFIX}employees`;
+const TBL_SHIFTS = `${DB_PREFIX}shifts`;
+const TBL_SETTINGS = `${DB_PREFIX}settings`;
+
+// Helper to simulate network latency (optional, currently 0 for speed)
+const delay = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 
 export const DatabaseService = {
-    // --- EMPLOYEES ---
+    // --- EMPLOYEES (Loaded once) ---
     async loadEmployees(): Promise<Employee[]> {
-        if (!db) return INITIAL_EMPLOYEES; // Segurança: Retorna dados locais se Firebase off
-
-        try {
-            const docRef = doc(db, DATA_COLLECTION, 'employees');
-            const docSnap = await getDoc(docRef);
-
-            if (docSnap.exists()) {
-                return docSnap.data().list as Employee[];
-            } else {
-                await this.saveEmployees(INITIAL_EMPLOYEES);
-                return INITIAL_EMPLOYEES;
-            }
-        } catch (error) {
-            console.error("Erro ao carregar colaboradores do Firestore:", error);
-            return INITIAL_EMPLOYEES;
-        }
+        const data = localStorage.getItem(TBL_EMPLOYEES);
+        if (data) return JSON.parse(data);
+        // Seed initial
+        return INITIAL_EMPLOYEES;
     },
 
     async saveEmployees(employees: Employee[]): Promise<void> {
-        if (!db) { 
-            console.warn("Salvamento ignorado: Firebase não configurado."); 
-            return; 
-        }
-
-        try {
-            await setDoc(doc(db, DATA_COLLECTION, 'employees'), { list: employees });
-        } catch (error) {
-            console.error("Erro ao salvar colaboradores:", error);
-            alert("Erro ao salvar no banco de dados.");
-        }
+        localStorage.setItem(TBL_EMPLOYEES, JSON.stringify(employees));
     },
 
-    // --- USERS ---
-    async loadUsers(): Promise<User[]> {
-        if (!db) return INITIAL_USERS;
-
-        try {
-            const docRef = doc(db, DATA_COLLECTION, 'users');
-            const docSnap = await getDoc(docRef);
-
-            if (docSnap.exists()) {
-                return docSnap.data().list as User[];
-            } else {
-                await this.saveUsers(INITIAL_USERS);
-                return INITIAL_USERS;
-            }
-        } catch (error) {
-            console.error("Erro ao carregar usuários:", error);
-            return INITIAL_USERS;
-        }
-    },
-
-    async saveUsers(users: User[]): Promise<void> {
-        if (!db) return;
-        try {
-            await setDoc(doc(db, DATA_COLLECTION, 'users'), { list: users });
-        } catch (error) {
-            console.error("Erro ao salvar usuários:", error);
-        }
-    },
-
-    // --- SHIFTS ---
+    // --- SHIFTS & SETTINGS ---
     async loadShifts(): Promise<Shift[]> {
-        if (!db) return INITIAL_SHIFTS;
-
-        try {
-            const docRef = doc(db, DATA_COLLECTION, 'shifts');
-            const docSnap = await getDoc(docRef);
-
-            if (docSnap.exists()) {
-                return docSnap.data().list as Shift[];
-            } else {
-                await this.saveShifts(INITIAL_SHIFTS);
-                return INITIAL_SHIFTS;
-            }
-        } catch (error) {
-            console.error("Erro ao carregar turnos:", error);
-            return INITIAL_SHIFTS;
-        }
+        const data = localStorage.getItem(TBL_SHIFTS);
+        return data ? JSON.parse(data) : INITIAL_SHIFTS;
     },
 
     async saveShifts(shifts: Shift[]): Promise<void> {
-        if (!db) return;
-        try {
-            await setDoc(doc(db, DATA_COLLECTION, 'shifts'), { list: shifts });
-        } catch (error) {
-            console.error("Erro ao salvar turnos:", error);
-        }
+        localStorage.setItem(TBL_SHIFTS, JSON.stringify(shifts));
     },
 
-    // --- SETTINGS ---
     async loadSettings(): Promise<{ aiRules: AIRulesConfig | null, staffing: StaffingConfig | null }> {
-        if (!db) return { aiRules: null, staffing: null };
-
-        try {
-            const docRef = doc(db, DATA_COLLECTION, 'settings');
-            const docSnap = await getDoc(docRef);
-
-            if (docSnap.exists()) {
-                return docSnap.data() as { aiRules: AIRulesConfig, staffing: StaffingConfig };
-            }
-            return { aiRules: null, staffing: null };
-        } catch (error) {
-            console.error("Erro ao carregar configurações:", error);
-            return { aiRules: null, staffing: null };
-        }
+        const data = localStorage.getItem(TBL_SETTINGS);
+        if (data) return JSON.parse(data);
+        return { aiRules: null, staffing: null };
     },
 
     async saveSettings(aiRules: AIRulesConfig, staffing: StaffingConfig): Promise<void> {
-        if (!db) return;
-        try {
-            await setDoc(doc(db, DATA_COLLECTION, 'settings'), { aiRules, staffing });
-        } catch (error) {
-            console.error("Erro ao salvar configurações:", error);
-        }
+        localStorage.setItem(TBL_SETTINGS, JSON.stringify({ aiRules, staffing }));
     },
 
-    // --- MONTHLY SCHEDULES ---
+    // --- SCHEDULES (Sharded by Month - The Performance Key) ---
+    // Instead of one giant file, we save 'DB_v1_schedule_2025_09', 'DB_v1_schedule_2025_10', etc.
     async loadMonthlySchedule(month: number, year: number): Promise<MonthlySchedule> {
-        // Retorno padrão vazio se não houver DB
-        const emptySchedule = { month, year, assignments: {}, attachments: {}, comments: {} };
-        if (!db) return emptySchedule;
-
-        const docId = `schedule_${year}_${month}`; 
-        try {
-            const docRef = doc(db, SCHEDULES_COLLECTION, docId);
-            const docSnap = await getDoc(docRef);
-
-            if (docSnap.exists()) {
-                return docSnap.data() as MonthlySchedule;
-            }
-            return emptySchedule;
-        } catch (error) {
-            console.error("Erro ao carregar escala:", error);
-            return emptySchedule;
+        const key = `${DB_PREFIX}schedule_${year}_${month}`;
+        const data = localStorage.getItem(key);
+        
+        if (data) {
+            return JSON.parse(data);
         }
+
+        // Return empty structure if not found
+        return {
+            month,
+            year,
+            assignments: {},
+            attachments: {},
+            comments: {}
+        };
     },
 
     async saveMonthlySchedule(schedule: MonthlySchedule): Promise<void> {
-        if (!db) { 
-            alert("Firebase não configurado! Dados não salvos na nuvem."); 
-            return; 
-        }
-
-        const docId = `schedule_${schedule.year}_${schedule.month}`;
-        try {
-            const cleanSchedule = JSON.parse(JSON.stringify(schedule));
-            await setDoc(doc(db, SCHEDULES_COLLECTION, docId), cleanSchedule);
-        } catch (error) {
-            console.error("Erro ao salvar escala:", error);
-            throw error;
-        }
+        const key = `${DB_PREFIX}schedule_${schedule.year}_${schedule.month}`;
+        // Prune empty keys to save space before saving
+        const optimized = { ...schedule };
+        // (Optional: Add logic here to remove empty objects from assignments)
+        localStorage.setItem(key, JSON.stringify(optimized));
     }
 };

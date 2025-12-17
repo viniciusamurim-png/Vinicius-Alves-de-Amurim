@@ -1,8 +1,8 @@
 
 import React, { useState } from 'react';
 import { User } from '../types';
+import { INITIAL_USERS } from '../constants';
 import { hashPassword, createSession } from '../services/securityService';
-import { DatabaseService } from '../services/databaseService';
 
 interface Props {
   onLogin: (user: User) => void;
@@ -19,33 +19,32 @@ export const LoginScreen: React.FC<Props> = ({ onLogin }) => {
     setLoading(true);
     setError('');
 
-    try {
-        // 1. Get Users from Firestore
-        const allUsers = await DatabaseService.loadUsers();
+    // Simulate network delay for security feeling
+    await new Promise(r => setTimeout(r, 500));
 
-        // 2. Hash Input Password
-        const hashedInput = await hashPassword(password);
-        
-        // 3. Find User
-        // Check both plain (legacy) and hashed (new standard)
-        const user = allUsers.find(u => 
-            u.username === username && 
-            (u.password === password || u.password === hashedInput)
-        );
-        
-        if (user) {
-            // Create Secure Session
-            const sessionUser = createSession(user);
-            onLogin(sessionUser);
-        } else {
-          setError('Credenciais inválidas ou acesso não autorizado.');
-        }
-    } catch (err) {
-        console.error(err);
-        setError('Erro ao conectar ao servidor. Verifique sua internet.');
-    } finally {
-        setLoading(false);
+    // 1. Get Users (In real app, this is API call)
+    const storedUsersStr = localStorage.getItem('APP_USERS');
+    const allUsers: User[] = storedUsersStr ? JSON.parse(storedUsersStr) : INITIAL_USERS;
+
+    // 2. Hash Input Password
+    const hashedInput = await hashPassword(password);
+    
+    // 3. Find User
+    // Note: In a real migration, existing plain-text passwords in 'allUsers' should be hashed.
+    // Here we check both plain (legacy) and hashed (new standard)
+    const user = allUsers.find(u => 
+        u.username === username && 
+        (u.password === password || u.password === hashedInput)
+    );
+    
+    if (user) {
+        // Create Secure Session
+        const sessionUser = createSession(user);
+        onLogin(sessionUser);
+    } else {
+      setError('Credenciais inválidas ou acesso não autorizado.');
     }
+    setLoading(false);
   };
 
   return (
@@ -57,7 +56,7 @@ export const LoginScreen: React.FC<Props> = ({ onLogin }) => {
             </div>
          </div>
          <h2 className="text-2xl font-bold text-center text-slate-800 mb-2">ESCALA FÁCIL</h2>
-         <p className="text-center text-slate-500 mb-6 text-sm">Acesso Seguro &bull; Nuvem</p>
+         <p className="text-center text-slate-500 mb-6 text-sm">Acesso Seguro &bull; Prevent Senior</p>
          
          <form onSubmit={handleLogin} className="space-y-4">
             <div>
@@ -99,9 +98,9 @@ export const LoginScreen: React.FC<Props> = ({ onLogin }) => {
             </button>
          </form>
          <div className="mt-6 flex justify-center text-[10px] text-slate-400 gap-4">
-             <span>v3.0 (Firebase)</span>
+             <span>v2.1.0 (Secure)</span>
              <span>&bull;</span>
-             <span>Online</span>
+             <span>Criptografia Ativa</span>
          </div>
       </div>
     </div>
