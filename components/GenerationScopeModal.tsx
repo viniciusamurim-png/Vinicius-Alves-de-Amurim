@@ -7,11 +7,9 @@ interface Props {
   onClose: () => void;
   employees: Employee[];
   onConfirm: (selectedEmployeeIds: string[]) => void;
-  title?: string;
-  confirmText?: string;
 }
 
-export const GenerationScopeModal: React.FC<Props> = ({ isOpen, onClose, employees, onConfirm, title, confirmText }) => {
+export const GenerationScopeModal: React.FC<Props> = ({ isOpen, onClose, employees, onConfirm }) => {
   const [scope, setScope] = useState<'all' | 'specific'>('all');
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
@@ -45,15 +43,13 @@ export const GenerationScopeModal: React.FC<Props> = ({ isOpen, onClose, employe
       <div className="bg-white rounded-lg shadow-2xl w-[500px] flex flex-col max-h-[600px]">
         <div className="flex items-center justify-between p-4 border-b bg-slate-50">
           <h3 className="font-bold text-slate-800 flex items-center gap-2">
-            {title || 'Configurar Geração de Escala (IA)'}
+            Configurar Geração de Escala (IA)
           </h3>
           <button onClick={onClose} className="text-slate-400 hover:text-slate-600">X</button>
         </div>
         
         <div className="p-6 space-y-4 overflow-y-auto">
-            <p className="text-sm text-slate-600 font-bold">
-                {title ? 'Para quem você deseja aplicar esta ação?' : 'Para quem você deseja gerar folgas?'}
-            </p>
+            <p className="text-sm text-slate-600 font-bold">Para quem você deseja gerar folgas?</p>
             
             <div className="flex gap-4">
                 <label className="flex items-center gap-2 cursor-pointer border p-3 rounded hover:bg-slate-50 flex-1">
@@ -96,8 +92,8 @@ export const GenerationScopeModal: React.FC<Props> = ({ isOpen, onClose, employe
 
         <div className="p-4 border-t bg-slate-50 flex justify-end gap-2">
             <button onClick={onClose} className="px-4 py-2 border rounded text-slate-600 text-sm hover:bg-white">Cancelar</button>
-            <button onClick={handleGenerate} className={`px-6 py-2 text-white font-bold rounded shadow uppercase text-sm ${confirmText ? 'bg-blue-600 hover:bg-blue-700' : 'bg-emerald-600 hover:bg-emerald-700'}`}>
-                {confirmText || 'Confirmar e Gerar'}
+            <button onClick={handleGenerate} className="px-6 py-2 bg-emerald-600 text-white font-bold rounded hover:bg-emerald-700 shadow uppercase text-sm">
+                Confirmar e Gerar
             </button>
         </div>
       </div>

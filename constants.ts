@@ -43,41 +43,38 @@ export const INITIAL_EMPLOYEES: Employee[] = [
 ];
 
 export const INITIAL_SHIFTS: Shift[] = [
-  // --- FOLGAS E DESCANSO (ESSENCIAIS) ---
+  // FOLGAS E DSR
   { id: 'folga', code: 'F', name: 'Folga', category: 'dayoff', startTime: '', endTime: '', color: 'bg-green-100', textColor: 'text-green-800', isDayOff: true },
   { id: 'dsr', code: 'DSR', name: 'Descanso Semanal', category: 'dayoff', startTime: '', endTime: '', color: 'bg-gray-100', textColor: 'text-gray-600', isDayOff: true },
   
-  // --- SOLICITADOS / ATUALIZADOS ---
+  // ABONOS
+  { id: 'folga_bh', code: 'FBH', name: 'Folga Banco de Horas', category: 'abono', startTime: '', endTime: '', color: 'bg-purple-100', textColor: 'text-purple-800', isDayOff: true },
+  
+  { id: 'folga_ajuste', code: 'FA', name: 'Folga Ajuste', category: 'dayoff', startTime: '', endTime: '', color: 'bg-green-50', textColor: 'text-green-900', isDayOff: true },
+  { id: 'folga_feriado', code: 'FF', name: 'Folga Feriado', category: 'dayoff', startTime: '', endTime: '', color: 'bg-green-200', textColor: 'text-green-900', isDayOff: true },
   { id: 'folga_pedida', code: 'FP', name: 'Folga Pedida', category: 'dayoff', startTime: '', endTime: '', color: 'bg-teal-100', textColor: 'text-teal-900', isDayOff: true },
   { id: 'folga_eleicao', code: 'FEL', name: 'Folga Eleição', category: 'dayoff', startTime: '', endTime: '', color: 'bg-teal-200', textColor: 'text-teal-900', isDayOff: true },
   { id: 'folga_saude', code: 'FS', name: 'Folga da Saúde', category: 'dayoff', startTime: '', endTime: '', color: 'bg-emerald-100', textColor: 'text-emerald-900', isDayOff: true },
-  { id: 'folga_ajuste', code: 'FA', name: 'Folga Ajuste', category: 'dayoff', startTime: '', endTime: '', color: 'bg-green-50', textColor: 'text-green-900', isDayOff: true },
-  { id: 'folga_feriado', code: 'FF', name: 'Folga Feriado', category: 'dayoff', startTime: '', endTime: '', color: 'bg-green-200', textColor: 'text-green-900', isDayOff: true },
   { id: 'troca_plantao', code: 'TP', name: 'Troca de Plantão', category: 'dayoff', startTime: '', endTime: '', color: 'bg-cyan-100', textColor: 'text-cyan-900', isDayOff: true },
-  
-  // --- ABONOS ---
-  { id: 'folga_bh', code: 'FBH', name: 'Folga Banco de Horas', category: 'abono', startTime: '', endTime: '', color: 'bg-purple-100', textColor: 'text-purple-800', isDayOff: true },
-  
-  // --- AUSÊNCIAS ---
+
+  // AUSÊNCIAS
   { id: 'falta_injust', code: 'FT', name: 'Falta Injustificada', category: 'absence', startTime: '', endTime: '', color: 'bg-red-300', textColor: 'text-red-900', isDayOff: true },
   { id: 'falta_just', code: 'FTJ', name: 'Falta Justificada', category: 'absence', startTime: '', endTime: '', color: 'bg-red-100', textColor: 'text-red-900', isDayOff: true },
   
-  // --- AFASTAMENTOS / LICENÇAS ---
+  // AFASTAMENTOS E OUTROS
   { id: 'ferias', code: 'FE', name: 'Férias', category: 'leave', startTime: '', endTime: '', color: 'bg-yellow-200', textColor: 'text-yellow-900', isDayOff: true },
   { id: 'atestado', code: 'AT', name: 'Atestado Médico', category: 'leave', startTime: '', endTime: '', color: 'bg-pink-100', textColor: 'text-pink-900', isDayOff: true },
   { id: 'licenca_mat', code: 'LM', name: 'Licença Maternidade', category: 'leave', startTime: '', endTime: '', color: 'bg-pink-200', textColor: 'text-pink-900', isDayOff: true },
   { id: 'inss', code: 'INSS', name: 'Afastamento INSS', category: 'leave', startTime: '', endTime: '', color: 'bg-indigo-200', textColor: 'text-indigo-900', isDayOff: true },
   { id: 'desligado', code: 'DLG', name: 'Desligado', category: 'leave', startTime: '', endTime: '', color: 'bg-gray-400', textColor: 'text-white', isDayOff: true },
 
-  // --- TRABALHO (WORK) ---
-  { id: 'servico_externo', code: 'SE', name: 'Serviço Externo', category: 'work', startTime: '08:00', endTime: '17:00', color: 'bg-blue-100', textColor: 'text-blue-900', isDayOff: false },
-  { id: 'curso', code: 'C', name: 'Curso Aprendiz', category: 'work', startTime: '08:00', endTime: '12:00', color: 'bg-amber-100', textColor: 'text-amber-900', isDayOff: false },
-  
-  // Padrões
+  // TRABALHO
   { id: 'manha', code: 'M', name: 'Manhã', category: 'work', startTime: '07:00', endTime: '13:00', color: 'bg-white', textColor: 'text-slate-900', isDayOff: false },
   { id: 'tarde', code: 'T', name: 'Tarde', category: 'work', startTime: '13:00', endTime: '19:00', color: 'bg-orange-50', textColor: 'text-orange-900', isDayOff: false },
   { id: 'noite', code: 'N', name: 'Noite', category: 'work', startTime: '19:00', endTime: '07:00', color: 'bg-indigo-50', textColor: 'text-indigo-900', isDayOff: false },
   { id: 'plantao', code: 'P', name: 'Plantão', category: 'work', startTime: '07:00', endTime: '19:00', color: 'bg-blue-50', textColor: 'text-blue-900', isDayOff: false },
+  { id: 'servico_externo', code: 'SE', name: 'Serviço Externo', category: 'work', startTime: '08:00', endTime: '17:00', color: 'bg-blue-100', textColor: 'text-blue-900', isDayOff: false },
+  { id: 'curso', code: 'C', name: 'Curso Aprendiz', category: 'work', startTime: '', endTime: '', color: 'bg-amber-100', textColor: 'text-amber-900', isDayOff: false },
 ];
 
 export const MONTH_NAMES = [
