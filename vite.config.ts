@@ -7,7 +7,7 @@ export default defineConfig(({ mode }) => {
     const env = loadEnv(mode, '.', ''); 
     
     return {
-        // CORREÇÃO: Usando o nome do novo repositório: Escalas-Facil-Version2
+        // CORREÇÃO: Adicionando o caminho base do seu repositório
         base: '/Escalas-Facil-Version2/', 
         
         server: {
@@ -19,7 +19,7 @@ export default defineConfig(({ mode }) => {
         
         define: {
             'process.env.API_KEY': JSON.stringify(env.GEMINI_API_KEY),
-            'process.env.GEMINI_API_KEY': JSON.stringify(env.GEMINI_API_KEY)
+            'process.env.API_KEY': JSON.stringify(env.GEMINI_API_KEY)
         },
         
         resolve: {
