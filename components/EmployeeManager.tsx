@@ -1,20 +1,43 @@
 
-import React, { useState } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { Employee } from '../types';
-import { INITIAL_UNITS as UNITS, INITIAL_SECTORS as SECTORS, INITIAL_SHIFT_TYPES as SHIFT_TYPES } from '../constants';
+import { INITIAL_SHIFT_TYPES as SHIFT_TYPES } from '../constants';
 
 interface Props {
   employees: Employee[];
   setEmployees: React.Dispatch<React.SetStateAction<Employee[]>>;
   onClose: () => void;
+  units: string[];
+  sectors: string[];
 }
 
-export const EmployeeManager: React.FC<Props> = ({ employees, setEmployees, onClose }) => {
+export const EmployeeManager: React.FC<Props> = ({ employees, setEmployees, onClose, units, sectors }) => {
   const [formData, setFormData] = useState({
-    name: '', role: '', unit: UNITS[0], sector: SECTORS[0],
+    name: '', role: '', unit: units[0] || '', sector: sectors[0] || '',
     cpf: '', positionNumber: '', categoryCode: '', shiftPattern: '', bankHoursBalance: '00:00',
     shiftType: ''
   });
+
+  // Calculate cascading sectors
+  const availableSectors = useMemo(() => {
+      // If a unit is selected, filter sectors found in existing employees of that unit
+      if (formData.unit) {
+          const unitSectors = new Set(employees.filter(e => e.unit === formData.unit).map(e => e.sector));
+          // Also include the current list of 'known' sectors if they haven't been assigned yet, 
+          // or just fallback to all sectors if no employees exist in that unit yet
+          if (unitSectors.size > 0) {
+              return Array.from(unitSectors).sort();
+          }
+      }
+      return sectors;
+  }, [formData.unit, employees, sectors]);
+
+  // Auto-select first sector if current selection is invalid for new unit
+  useEffect(() => {
+      if (availableSectors.length > 0 && !availableSectors.includes(formData.sector)) {
+          setFormData(prev => ({ ...prev, sector: availableSectors[0] }));
+      }
+  }, [availableSectors]);
 
   const handleChange = (field: string, value: string) => {
       setFormData(prev => ({ ...prev, [field]: value }));
@@ -38,7 +61,7 @@ export const EmployeeManager: React.FC<Props> = ({ employees, setEmployees, onCl
     };
     setEmployees([...employees, newEmployee]);
     setFormData({
-        name: '', role: '', unit: UNITS[0], sector: SECTORS[0],
+        name: '', role: '', unit: units[0] || '', sector: sectors[0] || '',
         cpf: '', positionNumber: '', categoryCode: '', shiftPattern: '', bankHoursBalance: '00:00',
         shiftType: ''
     });
@@ -82,13 +105,13 @@ export const EmployeeManager: React.FC<Props> = ({ employees, setEmployees, onCl
                         <div>
                              <label className="block text-[10px] font-bold text-slate-500 uppercase">Unidade</label>
                              <select className="w-full border-slate-300 rounded p-2 border bg-white text-sm" value={formData.unit} onChange={e => handleChange('unit', e.target.value)}>
-                                {UNITS.map(u => <option key={u} value={u}>{u}</option>)}
+                                {units.map(u => <option key={u} value={u}>{u}</option>)}
                             </select>
                         </div>
                         <div>
                              <label className="block text-[10px] font-bold text-slate-500 uppercase">Setor</label>
                              <select className="w-full border-slate-300 rounded p-2 border bg-white text-sm" value={formData.sector} onChange={e => handleChange('sector', e.target.value)}>
-                                {SECTORS.map(s => <option key={s} value={s}>{s}</option>)}
+                                {availableSectors.map(s => <option key={s} value={s}>{s}</option>)}
                             </select>
                         </div>
                     </div>

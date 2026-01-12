@@ -1,5 +1,5 @@
 
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import { Employee } from '../types.ts';
 import { ConfirmationModal } from './ConfirmationModal.tsx';
 
@@ -22,6 +22,15 @@ export const EmployeeDatabaseScreen: React.FC<Props> = ({ employees, setEmployee
 
   const [editingId, setEditingId] = useState<string | null>(null);
   const [formData, setFormData] = useState<Partial<Employee>>({});
+
+  // CASCADING SECTORS LOGIC FOR EDIT FORM
+  const availableFormSectors = useMemo(() => {
+      if (formData.unit) {
+          const unitSectors = new Set(employees.filter(e => e.unit === formData.unit).map(e => e.sector));
+          if (unitSectors.size > 0) return Array.from(unitSectors).sort();
+      }
+      return sectors;
+  }, [formData.unit, employees, sectors]);
 
   const filtered = useMemo(() => {
       return employees.filter(e => {
@@ -97,7 +106,7 @@ export const EmployeeDatabaseScreen: React.FC<Props> = ({ employees, setEmployee
              <div><label className="text-[10px] font-bold uppercase text-slate-500">Cargo</label><input className="w-full border rounded p-2 text-sm uppercase" value={formData.role || ''} onChange={e => setFormData({...formData, role: e.target.value})} /></div>
              <div className="grid grid-cols-2 gap-2">
                  <div><label className="text-[10px] font-bold uppercase text-slate-500">Unidade</label><select className="w-full border rounded p-2 text-sm bg-white" value={formData.unit || ''} onChange={e => setFormData({...formData, unit: e.target.value})}>{units.map(u => <option key={u} value={u}>{u}</option>)}</select></div>
-                 <div><label className="text-[10px] font-bold uppercase text-slate-500">Setor</label><select className="w-full border rounded p-2 text-sm bg-white" value={formData.sector || ''} onChange={e => setFormData({...formData, sector: e.target.value})}>{sectors.map(s => <option key={s} value={s}>{s}</option>)}</select></div>
+                 <div><label className="text-[10px] font-bold uppercase text-slate-500">Setor</label><select className="w-full border rounded p-2 text-sm bg-white" value={formData.sector || ''} onChange={e => setFormData({...formData, sector: e.target.value})}>{availableFormSectors.map(s => <option key={s} value={s}>{s}</option>)}</select></div>
              </div>
              <div><label className="text-[10px] font-bold uppercase text-slate-500">Turno</label><select className="w-full border rounded p-2 text-sm bg-white" value={formData.shiftType || ''} onChange={e => setFormData({...formData, shiftType: e.target.value})}><option value="">Selecione</option>{shiftTypes.map(s => <option key={s} value={s}>{s}</option>)}</select></div>
              <div><label className="text-[10px] font-bold uppercase text-slate-500">Unidade Organizacional</label><input className="w-full border rounded p-2 text-sm" value={formData.organizationalUnit || ''} onChange={e => setFormData({...formData, organizationalUnit: e.target.value})} /></div>

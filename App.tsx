@@ -151,10 +151,6 @@ const App: React.FC = () => {
 
     const loadData = async () => {
         try {
-            // First check local storage for legacy data (optional migration step, but simpler to just try StorageService first)
-            // We use StorageService.load which falls back to localStorage if IDB fails or is empty, 
-            // but for migration we might want to check localStorage specifically. 
-            // For now, let's assume StorageService handles the abstraction.
             const parsed = await StorageService.load('ESCALA_FACIL_DATA');
             if (parsed) {
                 if(parsed.employees) setEmployees(parsed.employees); 
@@ -196,7 +192,6 @@ const App: React.FC = () => {
           }
       } catch (e) {
           console.error("Sync failed", e);
-          // Optional: Show toast error
       } finally {
           setIsSyncing(false);
       }
@@ -553,7 +548,7 @@ const App: React.FC = () => {
         </div>
       )}
 
-      {showEmployees && <EmployeeManager employees={employees} setEmployees={setEmployees} onClose={() => setShowEmployees(false)} />}
+      {showEmployees && <EmployeeManager employees={employees} setEmployees={setEmployees} onClose={() => setShowEmployees(false)} units={units} sectors={sectors} />}
       {showShifts && <ShiftManager shifts={shifts} setShifts={setShifts} onClose={() => setShowShifts(false)} />}
       <RulesModal isOpen={showRules} onClose={() => setShowRules(false)} rules={aiRules} setRules={setAiRules} />
       <StaffingModal isOpen={showStaffing} onClose={() => setShowStaffing(false)} employees={employees} config={staffingConfig} setConfig={setStaffingConfig} />
