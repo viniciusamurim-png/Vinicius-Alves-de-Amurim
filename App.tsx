@@ -1,4 +1,3 @@
-
 import React, { useState, useMemo, useEffect, useCallback, useRef } from 'react';
 import { INITIAL_EMPLOYEES, INITIAL_SHIFTS, MONTH_NAMES, INITIAL_UNITS, INITIAL_SECTORS, INITIAL_SHIFT_TYPES } from './constants.ts';
 import { Employee, MonthlySchedule, Shift, AIRulesConfig, StaffingConfig, User } from './types.ts';
@@ -19,12 +18,20 @@ import { ReportsScreen } from './components/ReportsScreen.tsx';
 import { GenerationScopeModal } from './components/GenerationScopeModal.tsx';
 import { ConfirmationModal } from './components/ConfirmationModal.tsx';
 import { GoogleSheetsService } from './services/googleSheetsService.ts';
+import { StorageService } from './services/storageService.ts';
 
 // Icons
-const SaveIcon = ({ saved }: { saved: boolean }) => (
-    <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className={`w-5 h-5 ${saved ? 'text-green-400' : 'text-white'}`}>
-        <path strokeLinecap="round" strokeLinejoin="round" d={saved ? "M9 12.75L11.25 15 15 9.75M21 12a9 9 0 11-18 0 9 9 0 0118 0z" : "M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5M16.5 12L12 16.5m0 0L7.5 12m4.5 4.5V3"} />
-    </svg>
+const SaveIcon = ({ saved, saving }: { saved: boolean, saving: boolean }) => (
+    saving ? (
+        <svg className="animate-spin h-5 w-5 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+          <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+          <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+        </svg>
+    ) : (
+        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className={`w-5 h-5 ${saved ? 'text-green-400' : 'text-white'}`}>
+            <path strokeLinecap="round" strokeLinejoin="round" d={saved ? "M9 12.75L11.25 15 15 9.75M21 12a9 9 0 11-18 0 9 9 0 0118 0z" : "M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5M16.5 12L12 16.5m0 0L7.5 12m4.5 4.5V3"} />
+        </svg>
+    )
 );
 const PrintIcon = () => <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-5 h-5"><path strokeLinecap="round" strokeLinejoin="round" d="M6.72 13.829c-.24.03-.48.062-.72.096m.72-.096a42.415 42.415 0 0110.56 0m-10.56 0L6.34 18m10.94-4.171c.24.03.48.062.72.096m-.72-.096L17.66 18m0 0l.229 2.523a1.125 1.125 0 01-1.12 1.227H7.231c-.662 0-1.18-.568-1.12-1.227L6.34 18m11.318 0h1.091A2.25 2.25 0 0021 15.75V9.456c0-1.081-.768-2.015-1.837-2.175a48.055 48.055 0 00-1.913-.247M6.34 18H5.25A2.25 2.25 0 013 15.75V9.456c0-1.081.768-2.015 1.837-2.175a48.041 48.041 0 011.913-.247m10.5 0a48.536 48.536 0 00-10.5 0m10.5 0V3.375c0-.621-.504-1.125-1.125-1.125h-8.25c-.621 0-1.125.504-1.125 1.125v3.659M18 10.5h.008v.008H18V10.5zm-3 0h.008v.008H15V10.5z" /></svg>;
 const TagIcon = () => <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-5 h-5"><path strokeLinecap="round" strokeLinejoin="round" d="M9.568 3H5.25A2.25 2.25 0 003 5.25v4.318c0 .597.237 1.17.659 1.591l9.581 9.581c.699.699 1.78.872 2.607.33a18.095 18.095 0 005.223-5.223c.542-.827.369-1.908-.33-2.607L11.16 3.66A2.25 2.25 0 009.568 3z" /><path strokeLinecap="round" strokeLinejoin="round" d="M6 6h.008v.008H6V6z" /></svg>;
@@ -71,6 +78,7 @@ const App: React.FC = () => {
   // DIRTY STATE TRACKING
   const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
   const [isSyncing, setIsSyncing] = useState(false);
+  const [isSaving, setIsSaving] = useState(false);
 
   const setSchedule = useCallback((value: React.SetStateAction<MonthlySchedule>) => {
       setScheduleState(prev => {
@@ -141,23 +149,26 @@ const App: React.FC = () => {
     const session = localStorage.getItem('CURRENT_SESSION');
     if (session) { try { setCurrentUser(JSON.parse(session)); } catch(e) { console.error("Session parse error", e); } }
 
-    const savedData = localStorage.getItem('ESCALA_FACIL_DATA');
-    if (savedData) {
+    const loadData = async () => {
         try {
-            const parsed = JSON.parse(savedData);
-            // We do NOT setEmployees from local storage if we want it from sheets mainly, 
-            // but for offline support/caching we might. 
-            // For now, let's allow overwrite if sheets fetch works.
-            if(parsed.employees) setEmployees(parsed.employees); 
-            if(parsed.shifts) setShifts(parsed.shifts);
-            if(parsed.schedule) setScheduleState(parsed.schedule);
-            if(parsed.aiRules) setAiRules(parsed.aiRules);
-            if(parsed.staffingConfig) setStaffingConfig(parsed.staffingConfig);
-            if(parsed.units) setUnits(parsed.units);
-            if(parsed.sectors) setSectors(parsed.sectors);
-            if(parsed.shiftTypesList) setShiftTypesList(parsed.shiftTypesList);
+            // First check local storage for legacy data (optional migration step, but simpler to just try StorageService first)
+            // We use StorageService.load which falls back to localStorage if IDB fails or is empty, 
+            // but for migration we might want to check localStorage specifically. 
+            // For now, let's assume StorageService handles the abstraction.
+            const parsed = await StorageService.load('ESCALA_FACIL_DATA');
+            if (parsed) {
+                if(parsed.employees) setEmployees(parsed.employees); 
+                if(parsed.shifts) setShifts(parsed.shifts);
+                if(parsed.schedule) setScheduleState(parsed.schedule);
+                if(parsed.aiRules) setAiRules(parsed.aiRules);
+                if(parsed.staffingConfig) setStaffingConfig(parsed.staffingConfig);
+                if(parsed.units) setUnits(parsed.units);
+                if(parsed.sectors) setSectors(parsed.sectors);
+                if(parsed.shiftTypesList) setShiftTypesList(parsed.shiftTypesList);
+            }
         } catch (e) { console.error("Failed to load saved data", e); }
-    }
+    };
+    loadData();
   }, []);
 
   // Fetch from Google Sheets on Load (if logged in)
@@ -199,13 +210,24 @@ const App: React.FC = () => {
       setCurrentUser(null); localStorage.removeItem('CURRENT_SESSION'); 
   };
 
-  const handleSaveData = () => {
-      const dataToSave = { employees, shifts, schedule, aiRules, staffingConfig, units, sectors, shiftTypesList };
-      localStorage.setItem('ESCALA_FACIL_DATA', JSON.stringify(dataToSave));
-      if (currentUser) { localStorage.setItem('CURRENT_SESSION', JSON.stringify(currentUser)); }
-      setIsSaved(true);
-      setHasUnsavedChanges(false);
-      setTimeout(() => setIsSaved(false), 2000);
+  const handleSaveData = async () => {
+      setIsSaving(true);
+      try {
+          const dataToSave = { employees, shifts, schedule, aiRules, staffingConfig, units, sectors, shiftTypesList };
+          // Use StorageService for IndexedDB support (Large Data)
+          await StorageService.save('ESCALA_FACIL_DATA', dataToSave);
+          
+          if (currentUser) { localStorage.setItem('CURRENT_SESSION', JSON.stringify(currentUser)); }
+          
+          setIsSaved(true);
+          setHasUnsavedChanges(false);
+          setTimeout(() => setIsSaved(false), 2000);
+      } catch (e) {
+          console.error("Erro ao salvar", e);
+          alert("Não foi possível salvar os dados. " + (e instanceof Error ? e.message : "Erro desconhecido."));
+      } finally {
+          setIsSaving(false);
+      }
   };
 
   const handleUpdateEmployee = (id: string, field: string, value: string) => {
@@ -235,7 +257,7 @@ const App: React.FC = () => {
       
   }, [employees]);
 
-  // --- DERIVED LISTS FOR FILTERS (Restricted by User Permissions) ---
+  // --- DERIVED LISTS FOR FILTERS (Restricted by User Permissions AND Cascading) ---
   const availableEmployees = useMemo(() => {
       // First, filter all employees to only those the user is allowed to see based on UNITS
       if (currentUser?.role !== 'admin' && currentUser?.allowedUnits && currentUser.allowedUnits.length > 0) {
@@ -250,19 +272,40 @@ const App: React.FC = () => {
   }, [availableEmployees]);
 
   const activeSectors = useMemo(() => {
-      // Get sectors present in the AVAILABLE employees
-      let rawSectors = Array.from(new Set(availableEmployees.map(e => e.sector).filter(Boolean))).sort();
+      // Start with all available employees
+      let relevantEmployees = availableEmployees;
       
-      // Further restrict if the user has specific allowed sectors defined
+      // CASCADE: If Units are selected, filter potential sectors to only those units
+      if (selectedUnits.length > 0) {
+          relevantEmployees = relevantEmployees.filter(e => selectedUnits.includes(e.unit));
+      }
+
+      // Get sectors present in the filtered list
+      let rawSectors = Array.from(new Set(relevantEmployees.map(e => e.sector).filter(Boolean))).sort();
+      
+      // Further restrict if the user has specific allowed sectors defined (Permission Check)
       if (currentUser?.role !== 'admin' && currentUser?.allowedSectors && currentUser.allowedSectors.length > 0) {
           rawSectors = rawSectors.filter(s => currentUser.allowedSectors!.includes(s));
       }
       return rawSectors;
-  }, [availableEmployees, currentUser]);
+  }, [availableEmployees, currentUser, selectedUnits]);
 
   const activeShiftTypes = useMemo(() => {
-      return Array.from(new Set(availableEmployees.map(e => e.shiftType).filter(Boolean))).sort();
-  }, [availableEmployees]);
+      // Start with all available employees
+      let relevantEmployees = availableEmployees;
+
+      // CASCADE: Filter by Selected Units
+      if (selectedUnits.length > 0) {
+          relevantEmployees = relevantEmployees.filter(e => selectedUnits.includes(e.unit));
+      }
+
+      // CASCADE: Filter by Selected Sectors
+      if (selectedSectors.length > 0) {
+          relevantEmployees = relevantEmployees.filter(e => selectedSectors.includes(e.sector));
+      }
+
+      return Array.from(new Set(relevantEmployees.map(e => e.shiftType).filter(Boolean))).sort();
+  }, [availableEmployees, selectedUnits, selectedSectors]);
 
 
   // --- MAIN TABLE FILTERING ---
@@ -433,7 +476,7 @@ const App: React.FC = () => {
                     
                     {hasUnsavedChanges && <span className="text-xs text-yellow-300 font-bold animate-pulse mr-2 mb-2">Alterações não salvas!</span>}
 
-                    <Tooltip content="Salvar Alterações"><button onClick={handleSaveData} className={`p-2 rounded-full transition-all ${hasUnsavedChanges ? 'bg-yellow-600/50 animate-bounce' : 'hover:bg-white/10'}`}><SaveIcon saved={isSaved} /></button></Tooltip>
+                    <Tooltip content="Salvar Alterações"><button onClick={handleSaveData} disabled={isSaving} className={`p-2 rounded-full transition-all ${hasUnsavedChanges ? 'bg-yellow-600/50 animate-bounce' : 'hover:bg-white/10'}`}><SaveIcon saved={isSaved} saving={isSaving} /></button></Tooltip>
                     <Tooltip content="Imprimir Escala"><button onClick={handlePrint} className="p-2 text-white hover:bg-white/10 rounded-full transition-all"><PrintIcon /></button></Tooltip>
                     {canEdit && (<Tooltip content="Limpar Escala"><button onClick={handleClearClick} className="p-2 text-red-300 hover:bg-red-500/20 hover:text-red-200 rounded-full transition-all"><TrashIcon /></button></Tooltip>)}
                     <div className="w-px h-8 bg-blue-700 mx-2 hidden sm:block"></div>
@@ -531,11 +574,12 @@ const App: React.FC = () => {
         onClose={() => setShowConfirmClear(false)}
         onConfirm={executeClearSchedule}
         title="Confirmar Limpeza"
-        message={`ATENÇÃO: Você está prestes a limpar a escala de ${clearTargetIds.length === 0 ? 'TODOS os colaboradores visíveis' : clearTargetIds.length + ' colaboradores selecionados'} para este mês. Isso apagará turnos, anexos e observações. Deseja continuar?`}
+        message={`ATENÇÃO: Você está prestes a limpar a escala de ${clearTargetIds.length === 0 ? 'TODOS os colaboradores visíveis' : clearTargetIds.length + ' colaboradores selecionados'} para este mês. Isso apagará turnos, anexos e observações. Deseja realmente continuar?`}
         confirmText="Limpar Agora"
         isDangerous={true}
       />
     </div>
   );
 };
+
 export default App;
