@@ -1,23 +1,24 @@
 
 import React, { useState, useMemo, useEffect, useCallback, useRef } from 'react';
-import { INITIAL_EMPLOYEES, INITIAL_SHIFTS, MONTH_NAMES, INITIAL_UNITS, INITIAL_SECTORS, INITIAL_SHIFT_TYPES } from './constants';
-import { Employee, MonthlySchedule, Shift, AIRulesConfig, StaffingConfig, User } from './types';
-import { EmployeeManager } from './components/EmployeeManager';
-import { ShiftManager } from './components/ShiftManager';
-import { RosterGrid } from './components/RosterGrid';
-import { RulesModal } from './components/RulesModal';
-import { ImportModal } from './components/ImportModal';
-import { StaffingModal } from './components/StaffingModal';
-import { LoginScreen } from './components/LoginScreen';
-import { UserManagement } from './components/UserManagement';
-import { FilterManagerModal } from './components/FilterManagerModal';
-import { generateAISchedule } from './services/schedulerService';
-import { Tooltip } from './components/Tooltip';
-import { EmployeeDatabaseScreen } from './components/EmployeeDatabaseScreen';
-import { MultiSelect } from './components/MultiSelect';
-import { ReportsScreen } from './components/ReportsScreen';
-import { GenerationScopeModal } from './components/GenerationScopeModal';
-import { ConfirmationModal } from './components/ConfirmationModal';
+import { INITIAL_EMPLOYEES, INITIAL_SHIFTS, MONTH_NAMES, INITIAL_UNITS, INITIAL_SECTORS, INITIAL_SHIFT_TYPES } from './constants.ts';
+import { Employee, MonthlySchedule, Shift, AIRulesConfig, StaffingConfig, User } from './types.ts';
+import { EmployeeManager } from './components/EmployeeManager.tsx';
+import { ShiftManager } from './components/ShiftManager.tsx';
+import { RosterGrid } from './components/RosterGrid.tsx';
+import { RulesModal } from './components/RulesModal.tsx';
+import { ImportModal } from './components/ImportModal.tsx';
+import { StaffingModal } from './components/StaffingModal.tsx';
+import { LoginScreen } from './components/LoginScreen.tsx';
+import { UserManagement } from './components/UserManagement.tsx';
+import { FilterManagerModal } from './components/FilterManagerModal.tsx';
+import { generateAISchedule } from './services/schedulerService.ts';
+import { Tooltip } from './components/Tooltip.tsx';
+import { EmployeeDatabaseScreen } from './components/EmployeeDatabaseScreen.tsx';
+import { MultiSelect } from './components/MultiSelect.tsx';
+import { ReportsScreen } from './components/ReportsScreen.tsx';
+import { GenerationScopeModal } from './components/GenerationScopeModal.tsx';
+import { ConfirmationModal } from './components/ConfirmationModal.tsx';
+import { GoogleSheetsService } from './services/googleSheetsService.ts';
 
 // Icons
 const SaveIcon = ({ saved }: { saved: boolean }) => (
@@ -31,6 +32,11 @@ const TagIcon = () => <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBo
 const MegaphoneIcon = () => <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-5 h-5"><path strokeLinecap="round" strokeLinejoin="round" d="M10.34 15.84c-.688-.06-1.386-.09-2.09-.09H7.5a4.5 4.5 0 110-9h.75c.704 0 1.402-.03 2.09-.09m0 9.18c.253.962.584 1.892.985 2.783.247.55.06 1.21-.463 1.511l-.657.38c-.551.318-1.26.117-1.527-.461a20.845 20.845 0 01-1.44-4.282m3.102.069a18.03 18.03 0 01-.59-4.59c0-1.586.205-3.124.59-4.59m0 9.18a23.848 23.848 0 018.835 2.535M10.34 6.66a23.847 23.847 0 018.835-2.535m0 0A23.74 23.74 0 0018.795 3m.38 1.125a23.91 23.91 0 011.014 5.395m-1.014 8.855c-.118.38-.245.754-.38 1.125m.38-1.125a23.91 23.91 0 001.014-5.395m0-3.467a23.879 23.879 0 00-1.014-5.395m0 3.467c-.291 1.126-.541 2.274-.75 3.446M12.5 12h.008v.008H12.5V12z" /></svg>;
 const ChartBarIcon = () => <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-5 h-5"><path strokeLinecap="round" strokeLinejoin="round" d="M3 13.125C3 12.504 3.504 12 4.125 12h2.25c.621 0 1.125.504 1.125 1.125v6.75C7.5 20.496 6.996 21 6.375 21h-2.25A1.125 1.125 0 013 19.875v-6.75zM9.75 8.625c0-.621.504-1.125 1.125-1.125h2.25c.621 0 1.125.504 1.125 1.125v11.25c0 .621-.504 1.125-1.125 1.125h-2.25a1.125 1.125 0 01-1.125-1.125V8.625zM16.5 4.125c0-.621.504-1.125 1.125-1.125h2.25C20.496 3 21 3.504 21 4.125v15.75c0 .621-.504 1.125-1.125 1.125h-2.25a1.125 1.125 0 01-1.125-1.125V4.125z" /></svg>;
 const TrashIcon = () => <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-5 h-5"><path strokeLinecap="round" strokeLinejoin="round" d="M14.74 9l-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 01-2.244 2.077H8.084a2.25 2.25 0 01-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 00-3.478-.397m-12 .562c.34-.059.68-.114 1.022-.165m0 0a48.11 48.11 0 013.478-.397m7.5 0v-.916c0-1.18-.91-2.164-2.09-2.201a51.964 51.964 0 00-3.32 0c-1.18.037-2.09 1.022-2.09 2.201v.916m7.5 0a48.667 48.667 0 00-7.5 0" /></svg>;
+const RefreshIcon = ({ spinning }: { spinning: boolean }) => (
+    <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className={`w-5 h-5 ${spinning ? 'animate-spin' : ''}`}>
+        <path strokeLinecap="round" strokeLinejoin="round" d="M16.023 9.348h4.992v-.001M2.985 19.644v-4.992m0 0h4.992m-4.993 0l3.181 3.183a8.25 8.25 0 0013.803-3.7M4.031 9.865a8.25 8.25 0 0113.803-3.7l3.181 3.182m0-4.991v4.99" />
+    </svg>
+);
 
 const App: React.FC = () => {
   const [currentUser, setCurrentUser] = useState<User | null>(null);
@@ -64,6 +70,7 @@ const App: React.FC = () => {
   
   // DIRTY STATE TRACKING
   const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
+  const [isSyncing, setIsSyncing] = useState(false);
 
   const setSchedule = useCallback((value: React.SetStateAction<MonthlySchedule>) => {
       setScheduleState(prev => {
@@ -138,7 +145,10 @@ const App: React.FC = () => {
     if (savedData) {
         try {
             const parsed = JSON.parse(savedData);
-            if(parsed.employees) setEmployees(parsed.employees);
+            // We do NOT setEmployees from local storage if we want it from sheets mainly, 
+            // but for offline support/caching we might. 
+            // For now, let's allow overwrite if sheets fetch works.
+            if(parsed.employees) setEmployees(parsed.employees); 
             if(parsed.shifts) setShifts(parsed.shifts);
             if(parsed.schedule) setScheduleState(parsed.schedule);
             if(parsed.aiRules) setAiRules(parsed.aiRules);
@@ -149,6 +159,37 @@ const App: React.FC = () => {
         } catch (e) { console.error("Failed to load saved data", e); }
     }
   }, []);
+
+  // Fetch from Google Sheets on Load (if logged in)
+  useEffect(() => {
+      if (currentUser) {
+          handleSync();
+      }
+  }, [currentUser]);
+
+  const handleSync = async () => {
+      setIsSyncing(true);
+      try {
+          const apiData = await GoogleSheetsService.fetchEmployees();
+          if (apiData && apiData.length > 0) {
+              setEmployees(apiData);
+              // Optionally update Units/Sectors based on new data immediately
+              const builtUnits = new Set(INITIAL_UNITS);
+              const builtSectors = new Set(INITIAL_SECTORS);
+              apiData.forEach(e => {
+                  if(e.unit) builtUnits.add(e.unit);
+                  if(e.sector) builtSectors.add(e.sector);
+              });
+              setUnits(Array.from(builtUnits).sort());
+              setSectors(Array.from(builtSectors).sort());
+          }
+      } catch (e) {
+          console.error("Sync failed", e);
+          // Optional: Show toast error
+      } finally {
+          setIsSyncing(false);
+      }
+  };
 
   const handleLogin = (user: User) => { setCurrentUser(user); localStorage.setItem('CURRENT_SESSION', JSON.stringify(user)); };
   const handleLogout = () => { 
@@ -174,9 +215,9 @@ const App: React.FC = () => {
 
   // Sync Lists - Clean Dirt + Uppercase Shifts
   useEffect(() => {
-      const builtUnits = new Set(INITIAL_UNITS);
-      const builtSectors = new Set(INITIAL_SECTORS);
-      const builtTypes = new Set(INITIAL_SHIFT_TYPES);
+      const builtUnits = new Set(units); // Start with existing to not lose manually added ones via FilterManager
+      const builtSectors = new Set(sectors);
+      const builtTypes = new Set(shiftTypesList);
 
       employees.forEach(e => {
           if(e.unit) builtUnits.add(e.unit);
@@ -370,6 +411,13 @@ const App: React.FC = () => {
                 </div>
             )}
             <div className="flex items-center gap-3 shrink-0 ml-4">
+               {isAdmin && (
+                   <Tooltip content="Sincronizar Cadastros">
+                       <button onClick={handleSync} className={`p-2 rounded-full hover:bg-blue-800 transition-colors ${isSyncing ? 'text-blue-300' : 'text-white'}`}>
+                           <RefreshIcon spinning={isSyncing} />
+                       </button>
+                   </Tooltip>
+               )}
                <span className="text-xs text-blue-300 border-r border-blue-700 pr-3 mr-1 hidden sm:inline">Olá, {currentUser.name.split(' ')[0]}</span>
                {isAdmin && (<button onClick={() => setShowUserMgmt(true)} className="text-xs bg-blue-800 px-2 py-1 rounded hover:bg-blue-700">Usuários</button>)}
                <button onClick={handleLogout} className="text-xs text-red-300 hover:text-red-100 underline">Sair</button>

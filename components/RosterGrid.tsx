@@ -17,7 +17,7 @@ interface Props {
   isReadOnly?: boolean;
   onUndo?: () => void;
   onRedo?: () => void;
-  currentUserId?: string; // New prop for persistence
+  currentUserId?: string;
 }
 
 interface ContextMenuState {
@@ -40,25 +40,25 @@ interface DailyStat {
   roleIdeals: Record<string, number>;
 }
 
+const ITEMS_PER_PAGE = 50; // Limite seguro para renderização suave
+
 export const RosterGrid: React.FC<Props> = ({ 
     employees, shifts, currentSchedule, setSchedule, rules, staffingConfig, 
     onReorderEmployees, onUpdateEmployee, isReadOnly = false, onUndo, onRedo, currentUserId
 }) => {
   const [contextMenu, setContextMenu] = useState<ContextMenuState>({ visible: false, type: 'cell', x: 0, y: 0 });
   const menuRef = useRef<HTMLDivElement>(null);
-  
   const gridContainerRef = useRef<HTMLDivElement>(null);
   const internalClipboard = useRef<string | null>(null);
-  const footerScrollRef = useRef<HTMLDivElement>(null);
-
-  // Attachment Refs
   const fileInputRef = useRef<HTMLInputElement>(null);
   const attachmentTarget = useRef<{employeeId: string, day: number} | null>(null);
+  
+  // Pagination State
+  const [currentPage, setCurrentPage] = useState(1);
 
   const [draggedEmployeeId, setDraggedEmployeeId] = useState<string | null>(null);
   const [sortConfig, setSortConfig] = useState<{ key: ExtendedColumnKey | null, direction: 'asc' | 'desc' }>({ key: null, direction: 'asc' });
   
-  // State initialization from localStorage if available
   const [hiddenColumns, setHiddenColumns] = useState<ExtendedColumnKey[]>([]);
   const [frozenColumns, setFrozenColumns] = useState<ExtendedColumnKey[]>(['name']);
   const [colWidths, setColWidths] = useState<Record<ExtendedColumnKey, number>>({
@@ -81,26 +81,16 @@ export const RosterGrid: React.FC<Props> = ({
   // Save User Preferences
   useEffect(() => {
       if (currentUserId) {
-          localStorage.setItem(`USER_PREFS_${currentUserId}`, JSON.stringify({
-              hiddenColumns,
-              frozenColumns,
-              colWidths
-          }));
+          localStorage.setItem(`USER_PREFS_${currentUserId}`, JSON.stringify({ hiddenColumns, frozenColumns, colWidths }));
       }
   }, [hiddenColumns, frozenColumns, colWidths, currentUserId]);
 
   const [resizing, setResizing] = useState<{ key: ExtendedColumnKey, startX: number, startWidth: number } | null>(null);
-
-  // Selection & Focus
   const [selection, setSelection] = useState<GridSelection | null>(null);
   const [isSelecting, setIsSelecting] = useState(false);
   const [focusedCell, setFocusedCell] = useState<{empIndex: number, day: number} | null>(null);
 
-  const daysInMonth = useMemo(() => 
-    getDaysInMonth(currentSchedule.month, currentSchedule.year), 
-    [currentSchedule.month, currentSchedule.year]
-  );
-  
+  const daysInMonth = useMemo(() => getDaysInMonth(currentSchedule.month, currentSchedule.year), [currentSchedule.month, currentSchedule.year]);
   const daysArray = Array.from({ length: daysInMonth }, (_, i) => i + 1);
   const weekDays = ['DOM', 'SEG', 'TER', 'QUA', 'QUI', 'SEX', 'SAB'];
 
@@ -108,8 +98,7 @@ export const RosterGrid: React.FC<Props> = ({
   const sortedEmployees = useMemo(() => {
     if (!sortConfig.key) return employees;
     return [...employees].sort((a, b) => {
-        let valA = '';
-        let valB = '';
+        let valA = ''; let valB = '';
         switch (sortConfig.key) {
             case 'name': valA = a.name; valB = b.name; break;
             case 'id': valA = a.id; valB = b.id; break;
@@ -129,40 +118,43 @@ export const RosterGrid: React.FC<Props> = ({
     });
   }, [employees, sortConfig]);
 
-  // FIXED: Explicit column order to ensure consistent rendering and hiding
+  // Reset page when employees filter changes
+  useEffect(() => {
+      setCurrentPage(1);
+  }, [employees.length]);
+
+  // PAGINATION LOGIC
+  const paginatedEmployees = useMemo(() => {
+      const startIndex = (currentPage - 1) * ITEMS_PER_PAGE;
+      return sortedEmployees.slice(startIndex, startIndex + ITEMS_PER_PAGE);
+  }, [sortedEmployees, currentPage]);
+
+  const totalPages = Math.ceil(sortedEmployees.length / ITEMS_PER_PAGE);
+
   const orderedKeys: ExtendedColumnKey[] = ['name', 'id', 'role', 'cpf', 'scale', 'time', 'shiftType', 'position', 'council', 'bh', 'uf'];
-
-  // FIXED: Calculate visible columns based on ordered keys and hidden columns
-  const visibleColumns = useMemo(() => {
-      return orderedKeys.filter(k => !hiddenColumns.includes(k));
-  }, [hiddenColumns]);
-
+  const visibleColumns = useMemo(() => orderedKeys.filter(k => !hiddenColumns.includes(k)), [hiddenColumns]);
   const totalLeftWidth = visibleColumns.reduce((acc, key) => acc + colWidths[key], 0);
 
   const getStickyLeft = (key: ExtendedColumnKey) => {
       let offset = 0;
       for (const k of visibleColumns) {
           if (k === key) break;
-          if (frozenColumns.includes(k)) {
-              offset += colWidths[k];
-          }
+          if (frozenColumns.includes(k)) offset += colWidths[k];
       }
       return offset;
   }
 
-  // --- CLICK OUTSIDE TO CLEAR SELECTION & CLOSE MENU ---
+  // --- CLICK OUTSIDE ---
   useEffect(() => {
     const handleBackgroundClick = (e: MouseEvent) => {
-      // Check if click is inside grid container but NOT on a cell/row (or outside completely)
       if (gridContainerRef.current && gridContainerRef.current.contains(e.target as Node)) {
           const target = e.target as HTMLElement;
           if (target === gridContainerRef.current || target.classList.contains('roster-bg')) {
              setSelection(null);
              setFocusedCell(null);
-             setContextMenu(prev => ({...prev, visible: false})); // Close Menu
+             setContextMenu(prev => ({...prev, visible: false}));
           }
       } else {
-          // If clicked outside grid entirely
           setContextMenu(prev => ({...prev, visible: false}));
       }
     };
@@ -170,45 +162,24 @@ export const RosterGrid: React.FC<Props> = ({
     return () => document.removeEventListener('mousedown', handleBackgroundClick);
   }, []);
 
-
-  // --- RESIZING LOGIC ---
+  // --- RESIZING ---
   useEffect(() => {
     const handleMouseMove = (e: MouseEvent) => {
         if (!resizing) return;
         const delta = e.pageX - resizing.startX;
-        setColWidths(prev => ({
-            ...prev,
-            [resizing.key]: Math.max(40, resizing.startWidth + delta)
-        }));
+        setColWidths(prev => ({ ...prev, [resizing.key]: Math.max(40, resizing.startWidth + delta) }));
     };
-
-    const handleMouseUp = () => {
-        if (resizing) {
-            setResizing(null);
-            document.body.style.cursor = 'default';
-        }
-    };
-
-    if (resizing) {
-        window.addEventListener('mousemove', handleMouseMove);
-        window.addEventListener('mouseup', handleMouseUp);
-        document.body.style.cursor = 'col-resize';
-    }
-
-    return () => {
-        window.removeEventListener('mousemove', handleMouseMove);
-        window.removeEventListener('mouseup', handleMouseUp);
-    };
+    const handleMouseUp = () => { if (resizing) { setResizing(null); document.body.style.cursor = 'default'; } };
+    if (resizing) { window.addEventListener('mousemove', handleMouseMove); window.addEventListener('mouseup', handleMouseUp); document.body.style.cursor = 'col-resize'; }
+    return () => { window.removeEventListener('mousemove', handleMouseMove); window.removeEventListener('mouseup', handleMouseUp); };
   }, [resizing]);
 
   const handleResizeStart = (e: React.MouseEvent, key: ExtendedColumnKey) => {
-      e.preventDefault();
-      e.stopPropagation();
+      e.preventDefault(); e.stopPropagation();
       setResizing({ key, startX: e.pageX, startWidth: colWidths[key] });
   };
 
-
-  // Selection Handlers
+  // --- INTERACTION ---
   const handleMouseDown = (rowIndex: number, day: number) => {
     if (isReadOnly) return;
     setIsSelecting(true);
@@ -218,57 +189,36 @@ export const RosterGrid: React.FC<Props> = ({
   };
 
   const handleMouseEnter = (rowIndex: number, day: number) => {
-    if (isSelecting && selection) {
-        setSelection({ ...selection, endRow: rowIndex, endCol: day });
-    }
+    if (isSelecting && selection) setSelection({ ...selection, endRow: rowIndex, endCol: day });
   };
 
   const handleMouseUp = () => setIsSelecting(false);
 
-  // Keyboard Handlers
+  // Keyboard Navigation
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
         if (isReadOnly) return;
-
-        // --- ARROW NAVIGATION ---
         if (['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(e.key)) {
-            // Check if focus is inside an input (like shiftType or uf)
             if (document.activeElement?.tagName === 'INPUT') return;
-            
             e.preventDefault();
-            if (!focusedCell) {
-                setFocusedCell({ empIndex: 0, day: 1 });
-                setSelection({ startRow: 0, startCol: 1, endRow: 0, endCol: 1 });
-                return;
-            }
-
+            if (!focusedCell) { setFocusedCell({ empIndex: 0, day: 1 }); setSelection({ startRow: 0, startCol: 1, endRow: 0, endCol: 1 }); return; }
             let { empIndex, day } = focusedCell;
-            
             if (e.key === 'ArrowUp') empIndex = Math.max(0, empIndex - 1);
-            if (e.key === 'ArrowDown') empIndex = Math.min(sortedEmployees.length - 1, empIndex + 1);
+            if (e.key === 'ArrowDown') empIndex = Math.min(paginatedEmployees.length - 1, empIndex + 1);
             if (e.key === 'ArrowLeft') day = Math.max(1, day - 1);
             if (e.key === 'ArrowRight') day = Math.min(daysInMonth, day + 1);
-
             setFocusedCell({ empIndex, day });
-            if (e.shiftKey && selection) {
-                 setSelection({ ...selection, endRow: empIndex, endCol: day });
-            } else {
-                 setSelection({ startRow: empIndex, startCol: day, endRow: empIndex, endCol: day });
-            }
+            if (e.shiftKey && selection) setSelection({ ...selection, endRow: empIndex, endCol: day });
+            else setSelection({ startRow: empIndex, startCol: day, endRow: empIndex, endCol: day });
             return;
         }
-
-        // UNDO / REDO
         if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'z' && !e.shiftKey) { e.preventDefault(); if (onUndo) onUndo(); return; }
         if (((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'y') || ((e.ctrlKey || e.metaKey) && e.shiftKey && e.key.toLowerCase() === 'z')) { e.preventDefault(); if (onRedo) onRedo(); return; }
-
         if (!selection) return;
 
-        // DELETE
+        // DELETE Logic
         if (e.key === 'Delete' || e.key === 'Backspace') {
-            // Check if focus is inside an input (like shiftType or uf)
             if (document.activeElement?.tagName === 'INPUT') return;
-
             e.preventDefault();
             const minR = Math.min(selection.startRow, selection.endRow);
             const maxR = Math.max(selection.startRow, selection.endRow);
@@ -281,22 +231,14 @@ export const RosterGrid: React.FC<Props> = ({
             
             let changed = false;
             for (let r = minR; r <= maxR; r++) {
-                const emp = sortedEmployees[r];
+                const emp = paginatedEmployees[r]; // Using paginated subset
                 if (!emp) continue;
                 const dateKeys = [];
-                for (let c = minC; c <= maxC; c++) {
-                    dateKeys.push(`${currentSchedule.year}-${String(currentSchedule.month + 1).padStart(2, '0')}-${String(c).padStart(2, '0')}`);
-                }
+                for (let c = minC; c <= maxC; c++) dateKeys.push(`${currentSchedule.year}-${String(currentSchedule.month + 1).padStart(2, '0')}-${String(c).padStart(2, '0')}`);
                 
-                if (newAssignments[emp.id]) {
-                    dateKeys.forEach(k => { if(newAssignments[emp.id][k]) { delete newAssignments[emp.id][k]; changed = true; }});
-                }
-                if (newAttachments[emp.id]) {
-                     dateKeys.forEach(k => { if(newAttachments[emp.id][k]) { delete newAttachments[emp.id][k]; changed = true; }});
-                }
-                 if (newComments[emp.id]) {
-                     dateKeys.forEach(k => { if(newComments[emp.id][k]) { delete newComments[emp.id][k]; changed = true; }});
-                }
+                if (newAssignments[emp.id]) dateKeys.forEach(k => { if(newAssignments[emp.id][k]) { delete newAssignments[emp.id][k]; changed = true; }});
+                if (newAttachments[emp.id]) dateKeys.forEach(k => { if(newAttachments[emp.id][k]) { delete newAttachments[emp.id][k]; changed = true; }});
+                if (newComments[emp.id]) dateKeys.forEach(k => { if(newComments[emp.id][k]) { delete newComments[emp.id][k]; changed = true; }});
             }
             if (changed) setSchedule(prev => ({ ...prev, assignments: newAssignments, attachments: newAttachments, comments: newComments }));
         }
@@ -305,7 +247,7 @@ export const RosterGrid: React.FC<Props> = ({
         if ((e.ctrlKey || e.metaKey) && e.key === 'c') {
             const startR = Math.min(selection.startRow, selection.endRow);
             const startC = Math.min(selection.startCol, selection.endCol);
-            const emp = sortedEmployees[startR];
+            const emp = paginatedEmployees[startR];
             if (!emp) return;
             const dateKey = `${currentSchedule.year}-${String(currentSchedule.month + 1).padStart(2, '0')}-${String(startC).padStart(2, '0')}`;
             const shiftId = currentSchedule.assignments[emp.id]?.[dateKey];
@@ -323,7 +265,7 @@ export const RosterGrid: React.FC<Props> = ({
 
                 const newAssignments = { ...currentSchedule.assignments };
                 for (let r = minR; r <= maxR; r++) {
-                    const emp = sortedEmployees[r];
+                    const emp = paginatedEmployees[r];
                     if (!emp) continue;
                     if (!newAssignments[emp.id]) newAssignments[emp.id] = {};
                     const empSchedule = { ...newAssignments[emp.id] };
@@ -337,10 +279,9 @@ export const RosterGrid: React.FC<Props> = ({
              }
         }
     };
-
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [selection, currentSchedule, sortedEmployees, isReadOnly, focusedCell, setSchedule, onUndo, onRedo]);
+  }, [selection, currentSchedule, paginatedEmployees, isReadOnly, focusedCell, setSchedule, onUndo, onRedo]);
 
   const isSelected = (rowIndex: number, day: number) => {
     if (!selection) return false;
@@ -351,8 +292,10 @@ export const RosterGrid: React.FC<Props> = ({
     return rowIndex >= minR && rowIndex <= maxR && day >= minC && day <= maxC;
   };
 
-  // --- STATS ---
+  // --- STATS (Calculated on FULL List for accuracy) ---
   const dailyStats = useMemo<DailyStat[]>(() => {
+      // Avoid expensive calc if 16k employees and user is just navigating
+      // Optimization: Only recalc if employees or schedule changes
       return daysArray.map(day => {
           const date = new Date(currentSchedule.year, currentSchedule.month, day);
           const dayKeys = ['sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday'];
@@ -362,10 +305,10 @@ export const RosterGrid: React.FC<Props> = ({
           let totalActive = 0;
           const roleCounts: Record<string, number> = {};
 
+          // Iterate FULL list for stats
           employees.forEach(emp => {
               const shiftId = currentSchedule.assignments[emp.id]?.[dateKey];
               const shift = shifts.find(s => s.id === shiftId);
-              // Count if explicitly Work OR if Empty (undefined)
               const isWork = !shift || (shift.category !== 'dayoff' && shift.category !== 'absence' && shift.category !== 'leave');
               if (isWork) {
                   totalActive++;
@@ -382,7 +325,6 @@ export const RosterGrid: React.FC<Props> = ({
       });
   }, [employees, currentSchedule, shifts, daysArray, staffingConfig]);
 
-  // Helpers
   const getDayLabel = (day: number) => weekDays[new Date(currentSchedule.year, currentSchedule.month, day).getDay()];
   const isWeekendOrHoliday = (day: number) => {
     const dayOfWeek = new Date(currentSchedule.year, currentSchedule.month, day).getDay();
@@ -391,161 +333,34 @@ export const RosterGrid: React.FC<Props> = ({
   }
   const getHolidayName = (day: number) => HOLIDAYS[`${String(day).padStart(2, '0')}-${String(currentSchedule.month + 1).padStart(2, '0')}`];
 
-  // --- CONTEXT MENU HANDLERS ---
+  // --- MENU HANDLERS ---
   const handleCellContextMenu = (e: React.MouseEvent, employeeId: string, day: number) => {
-      e.preventDefault();
-      if (isReadOnly) return;
-      
+      e.preventDefault(); if (isReadOnly) return;
       const dateKey = `${currentSchedule.year}-${String(currentSchedule.month + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
       const shiftId = currentSchedule.assignments[employeeId]?.[dateKey];
       const shift = shifts.find(s => s.id === shiftId);
-      
       let assignmentType: ContextMenuState['assignmentType'] = 'other';
       if (shift?.category === 'absence' || shift?.category === 'leave') assignmentType = 'leave';
-
-      const hasAttachment = !!currentSchedule.attachments?.[employeeId]?.[dateKey];
-
-      setContextMenu({ visible: true, type: 'cell', x: e.pageX, y: e.pageY, employeeId, day, assignmentType, hasAttachment, isCommentMenu: false });
+      setContextMenu({ visible: true, type: 'cell', x: e.pageX, y: e.pageY, employeeId, day, assignmentType, hasAttachment: !!currentSchedule.attachments?.[employeeId]?.[dateKey], isCommentMenu: false });
   };
 
-  const handleHeaderContextMenu = (e: React.MouseEvent, key: ExtendedColumnKey) => {
-      e.preventDefault();
-      setContextMenu({ visible: true, type: 'header', x: e.pageX, y: e.pageY, columnKey: key });
-  };
-
-  const handleAttachFile = () => {
-      if(contextMenu.employeeId && contextMenu.day) {
-          attachmentTarget.current = { employeeId: contextMenu.employeeId, day: contextMenu.day };
-          fileInputRef.current?.click();
-      }
-      setContextMenu(prev => ({...prev, visible: false}));
-  };
-  
-  const handleAddComment = (comment: string) => {
-      if (contextMenu.employeeId && contextMenu.day) {
-          const dateKey = `${currentSchedule.year}-${String(currentSchedule.month + 1).padStart(2, '0')}-${String(contextMenu.day).padStart(2, '0')}`;
-          setSchedule(prev => ({
-              ...prev,
-              comments: {
-                  ...prev.comments,
-                  [contextMenu.employeeId!]: {
-                      ...(prev.comments?.[contextMenu.employeeId!] || {}),
-                      [dateKey]: comment
-                  }
-              }
-          }));
-      }
-      setContextMenu(prev => ({...prev, visible: false, isCommentMenu: false}));
-  }
-
-  const handleDownloadAttachment = () => {
-     if(contextMenu.employeeId && contextMenu.day) {
-        const dateKey = `${currentSchedule.year}-${String(currentSchedule.month + 1).padStart(2, '0')}-${String(contextMenu.day).padStart(2, '0')}`;
-        const attachment = currentSchedule.attachments?.[contextMenu.employeeId]?.[dateKey];
-        
-        if (attachment) {
-            const link = document.createElement("a");
-            link.href = attachment.data;
-            link.download = attachment.name;
-            document.body.appendChild(link);
-            link.click();
-            document.body.removeChild(link);
-        }
-     }
-     setContextMenu(prev => ({...prev, visible: false}));
-  }
-
-  const handleFileSelected = (e: React.ChangeEvent<HTMLInputElement>) => {
-      if (e.target.files && e.target.files[0] && attachmentTarget.current) {
-          const file = e.target.files[0];
-          const { employeeId, day } = attachmentTarget.current;
-          const dateKey = `${currentSchedule.year}-${String(currentSchedule.month + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
-          
-          const reader = new FileReader();
-          reader.onload = (event) => {
-             const base64Data = event.target?.result as string;
-             if (base64Data) {
-                setSchedule(prev => ({
-                    ...prev,
-                    attachments: {
-                        ...prev.attachments,
-                        [employeeId]: {
-                            ...(prev.attachments?.[employeeId] || {}),
-                            [dateKey]: { name: file.name, data: base64Data }
-                        }
-                    }
-                }));
-             }
-          };
-          reader.readAsDataURL(file);
-      }
-      if (e.target) e.target.value = '';
-  };
-
-  const handleSelectShift = (shiftId: string) => {
-      if (contextMenu.employeeId && contextMenu.day) {
-          const dateKey = `${currentSchedule.year}-${String(currentSchedule.month + 1).padStart(2, '0')}-${String(contextMenu.day).padStart(2, '0')}`;
-          setSchedule(prev => ({
-            ...prev, assignments: { ...prev.assignments, [contextMenu.employeeId!]: { ...(prev.assignments[contextMenu.employeeId!] || {}), [dateKey]: shiftId } }
-         }));
-      }
-      setContextMenu(prev => ({ ...prev, visible: false }));
-  };
-
-  const handleClearCell = () => {
-       if (contextMenu.employeeId && contextMenu.day) {
-          const dateKey = `${currentSchedule.year}-${String(currentSchedule.month + 1).padStart(2, '0')}-${String(contextMenu.day).padStart(2, '0')}`;
-          const newAssignments = { ...(currentSchedule.assignments[contextMenu.employeeId!] || {}) };
-          delete newAssignments[dateKey];
-          // Clear attachment
-          const newAttachments = { ...(currentSchedule.attachments?.[contextMenu.employeeId!] || {}) };
-          if(newAttachments[dateKey]) delete newAttachments[dateKey];
-          // Clear comment
-          const newComments = { ...(currentSchedule.comments?.[contextMenu.employeeId!] || {}) };
-          if(newComments[dateKey]) delete newComments[dateKey];
-          
-          setSchedule(prev => ({ 
-              ...prev, 
-              assignments: { ...prev.assignments, [contextMenu.employeeId!]: newAssignments },
-              attachments: { ...prev.attachments, [contextMenu.employeeId!]: newAttachments },
-              comments: { ...prev.comments, [contextMenu.employeeId!]: newComments }
-          }));
-       }
-       setContextMenu(prev => ({ ...prev, visible: false }));
-  }
-
-  // Row Drag
+  const handleHeaderContextMenu = (e: React.MouseEvent, key: ExtendedColumnKey) => { e.preventDefault(); setContextMenu({ visible: true, type: 'header', x: e.pageX, y: e.pageY, columnKey: key }); };
+  const handleAttachFile = () => { if(contextMenu.employeeId && contextMenu.day) { attachmentTarget.current = { employeeId: contextMenu.employeeId, day: contextMenu.day }; fileInputRef.current?.click(); } setContextMenu(prev => ({...prev, visible: false})); };
+  const handleAddComment = (comment: string) => { if (contextMenu.employeeId && contextMenu.day) { const dateKey = `${currentSchedule.year}-${String(currentSchedule.month + 1).padStart(2, '0')}-${String(contextMenu.day).padStart(2, '0')}`; setSchedule(prev => ({ ...prev, comments: { ...prev.comments, [contextMenu.employeeId!]: { ...(prev.comments?.[contextMenu.employeeId!] || {}), [dateKey]: comment } } })); } setContextMenu(prev => ({...prev, visible: false, isCommentMenu: false})); }
+  const handleDownloadAttachment = () => { if(contextMenu.employeeId && contextMenu.day) { const dateKey = `${currentSchedule.year}-${String(currentSchedule.month + 1).padStart(2, '0')}-${String(contextMenu.day).padStart(2, '0')}`; const attachment = currentSchedule.attachments?.[contextMenu.employeeId]?.[dateKey]; if (attachment) { const link = document.createElement("a"); link.href = attachment.data; link.download = attachment.name; document.body.appendChild(link); link.click(); document.body.removeChild(link); } } setContextMenu(prev => ({...prev, visible: false})); }
+  const handleFileSelected = (e: React.ChangeEvent<HTMLInputElement>) => { if (e.target.files && e.target.files[0] && attachmentTarget.current) { const file = e.target.files[0]; const { employeeId, day } = attachmentTarget.current; const dateKey = `${currentSchedule.year}-${String(currentSchedule.month + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`; const reader = new FileReader(); reader.onload = (event) => { const base64Data = event.target?.result as string; if (base64Data) { setSchedule(prev => ({ ...prev, attachments: { ...prev.attachments, [employeeId]: { ...(prev.attachments?.[employeeId] || {}), [dateKey]: { name: file.name, data: base64Data } } } })); } }; reader.readAsDataURL(file); } if (e.target) e.target.value = ''; };
+  const handleSelectShift = (shiftId: string) => { if (contextMenu.employeeId && contextMenu.day) { const dateKey = `${currentSchedule.year}-${String(currentSchedule.month + 1).padStart(2, '0')}-${String(contextMenu.day).padStart(2, '0')}`; setSchedule(prev => ({ ...prev, assignments: { ...prev.assignments, [contextMenu.employeeId!]: { ...(prev.assignments[contextMenu.employeeId!] || {}), [dateKey]: shiftId } } })); } setContextMenu(prev => ({ ...prev, visible: false })); };
+  const handleClearCell = () => { if (contextMenu.employeeId && contextMenu.day) { const dateKey = `${currentSchedule.year}-${String(currentSchedule.month + 1).padStart(2, '0')}-${String(contextMenu.day).padStart(2, '0')}`; const newAssignments = { ...(currentSchedule.assignments[contextMenu.employeeId!] || {}) }; delete newAssignments[dateKey]; const newAttachments = { ...(currentSchedule.attachments?.[contextMenu.employeeId!] || {}) }; if(newAttachments[dateKey]) delete newAttachments[dateKey]; const newComments = { ...(currentSchedule.comments?.[contextMenu.employeeId!] || {}) }; if(newComments[dateKey]) delete newComments[dateKey]; setSchedule(prev => ({ ...prev, assignments: { ...prev.assignments, [contextMenu.employeeId!]: newAssignments }, attachments: { ...prev.attachments, [contextMenu.employeeId!]: newAttachments }, comments: { ...prev.comments, [contextMenu.employeeId!]: newComments } })); } setContextMenu(prev => ({ ...prev, visible: false })); }
   const handleDragStart = (e: React.DragEvent, id: string) => { if (isReadOnly) return; setDraggedEmployeeId(id); e.dataTransfer.effectAllowed = 'move'; };
   const handleDrop = (e: React.DragEvent, targetId: string) => { e.preventDefault(); if (isReadOnly) return; if (draggedEmployeeId && draggedEmployeeId !== targetId && onReorderEmployees) { onReorderEmployees(draggedEmployeeId, targetId); } setDraggedEmployeeId(null); };
 
-  const labelMap: Record<ExtendedColumnKey, string> = { 
-      name: 'NOME COLABORADOR', id: 'ID', role: 'CARGO', cpf: 'CPF', 
-      scale: 'ESCALA', time: 'HORÁRIO', shiftType: 'TURNO', position: 'Nº POSIÇÃO', council: 'REG. CONSELHO', bh: 'BH', uf: 'UF' 
-  };
+  const labelMap: Record<ExtendedColumnKey, string> = { name: 'NOME COLABORADOR', id: 'ID', role: 'CARGO', cpf: 'CPF', scale: 'ESCALA', time: 'HORÁRIO', shiftType: 'TURNO', position: 'Nº POSIÇÃO', council: 'REG. CONSELHO', bh: 'BH', uf: 'UF' };
 
   return (
-    <div ref={gridContainerRef} className="roster-bg bg-white rounded shadow-sm border border-slate-300 flex flex-col h-full w-full overflow-auto select-none relative print:border-none print:shadow-none" onMouseUp={handleMouseUp}>
-      {hiddenColumns.length > 0 && (
-          <button 
-            onClick={() => setHiddenColumns([])} 
-            title="Restaurar Colunas"
-            className="absolute top-1 left-1 z-[70] bg-blue-100 text-blue-700 p-1.5 rounded-full shadow hover:bg-blue-200 print:hidden transition-all w-fit h-fit"
-          >
-            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="w-4 h-4">
-                <path d="M10 12.5a2.5 2.5 0 100-5 2.5 2.5 0 000 5z" />
-                <path fillRule="evenodd" d="M.664 10.59a1.651 1.651 0 010-1.186A10.004 10.004 0 0110 3c4.257 0 7.893 2.66 9.336 6.41.147.381.146.804 0 1.186A10.004 10.004 0 0110 17c-4.257 0-7.893-2.66-9.336-6.41zM14 10a4 4 0 11-8 0 4 4 0 018 0z" clipRule="evenodd" />
-            </svg>
-          </button>
-      )}
-      
-      {/* Hidden File Input for Attachments */}
-      <input 
-        type="file" 
-        hidden 
-        ref={fileInputRef} 
-        accept=".png,.jpg,.jpeg,.pdf" 
-        onChange={handleFileSelected} 
-      />
+    <div ref={gridContainerRef} className="roster-bg bg-white rounded shadow-sm border border-slate-300 flex flex-col h-full w-full overflow-hidden select-none relative print:border-none print:shadow-none" onMouseUp={handleMouseUp}>
+      {/* Hidden Columns Button */}
+      {hiddenColumns.length > 0 && <button onClick={() => setHiddenColumns([])} title="Restaurar Colunas" className="absolute top-1 left-1 z-[70] bg-blue-100 text-blue-700 p-1.5 rounded-full shadow hover:bg-blue-200 print:hidden transition-all w-fit h-fit"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="w-4 h-4"><path d="M10 12.5a2.5 2.5 0 100-5 2.5 2.5 0 000 5z" /><path fillRule="evenodd" d="M.664 10.59a1.651 1.651 0 010-1.186A10.004 10.004 0 0110 3c4.257 0 7.893 2.66 9.336 6.41.147.381.146.804 0 1.186A10.004 10.004 0 0110 17c-4.257 0-7.893-2.66-9.336-6.41zM14 10a4 4 0 11-8 0 4 4 0 018 0z" clipRule="evenodd" /></svg></button>}
+      <input type="file" hidden ref={fileInputRef} accept=".png,.jpg,.jpeg,.pdf" onChange={handleFileSelected} />
 
       {contextMenu.visible && (
           <div ref={menuRef} className="fixed z-[100] bg-white shadow-xl rounded-lg border border-slate-200 py-1 min-w-[180px]" style={{ top: contextMenu.y, left: contextMenu.x }}>
@@ -558,76 +373,46 @@ export const RosterGrid: React.FC<Props> = ({
               ) : contextMenu.isCommentMenu ? (
                   <>
                       <button onClick={() => setContextMenu(prev => ({...prev, isCommentMenu: false}))} className="w-full text-left px-4 py-2 hover:bg-slate-50 text-xs text-slate-500 border-b">◄ Voltar</button>
-                      {COMMENTS_OPTIONS.map(opt => (
-                           <button key={opt} onClick={() => handleAddComment(opt)} className="w-full text-left px-4 py-2 hover:bg-blue-50 text-xs font-bold text-slate-700">{opt}</button>
-                      ))}
+                      {COMMENTS_OPTIONS.map(opt => <button key={opt} onClick={() => handleAddComment(opt)} className="w-full text-left px-4 py-2 hover:bg-blue-50 text-xs font-bold text-slate-700">{opt}</button>)}
                   </>
               ) : (
                   <>
-                    {contextMenu.assignmentType === 'leave' && (
-                        <button onClick={handleAttachFile} className="w-full text-left px-4 py-2 hover:bg-blue-50 text-xs font-bold text-blue-700 border-b flex items-center gap-2">📎 Anexar Arquivo</button>
-                    )}
-                    {contextMenu.hasAttachment && (
-                        <button onClick={handleDownloadAttachment} className="w-full text-left px-4 py-2 hover:bg-green-50 text-xs font-bold text-green-700 border-b flex items-center gap-2">📥 Baixar Anexo</button>
-                    )}
+                    {contextMenu.assignmentType === 'leave' && <button onClick={handleAttachFile} className="w-full text-left px-4 py-2 hover:bg-blue-50 text-xs font-bold text-blue-700 border-b flex items-center gap-2">📎 Anexar Arquivo</button>}
+                    {contextMenu.hasAttachment && <button onClick={handleDownloadAttachment} className="w-full text-left px-4 py-2 hover:bg-green-50 text-xs font-bold text-green-700 border-b flex items-center gap-2">📥 Baixar Anexo</button>}
                     <button onClick={() => setContextMenu(prev => ({...prev, isCommentMenu: true}))} className="w-full text-left px-4 py-2 hover:bg-orange-50 text-xs font-bold text-orange-700 border-b flex items-center gap-2">💬 Adicionar Observação</button>
                     <button onClick={handleClearCell} className="w-full text-left px-4 py-2 hover:bg-red-50 text-xs text-red-600 font-bold border-b">Limpar</button>
-                    <div className="max-h-60 overflow-y-auto">
-                        {shifts.map(shift => (
-                            <button key={shift.id} onClick={() => handleSelectShift(shift.id)} className="w-full text-left px-4 py-2 hover:bg-blue-50 text-xs text-slate-700 flex items-center gap-2">
-                                <span className={`w-5 h-5 flex items-center justify-center rounded text-[10px] font-bold border ${shift.color} ${shift.textColor || 'text-slate-800'}`}>{shift.code}</span>
-                                <span>{shift.name}</span>
-                            </button>
-                        ))}
-                    </div>
+                    <div className="max-h-60 overflow-y-auto">{shifts.map(shift => <button key={shift.id} onClick={() => handleSelectShift(shift.id)} className="w-full text-left px-4 py-2 hover:bg-blue-50 text-xs text-slate-700 flex items-center gap-2"><span className={`w-5 h-5 flex items-center justify-center rounded text-[10px] font-bold border ${shift.color} ${shift.textColor || 'text-slate-800'}`}>{shift.code}</span><span>{shift.name}</span></button>)}</div>
                   </>
               )}
           </div>
       )}
 
       {/* HEADER */}
-      <div className="flex bg-company-blue text-white z-40 shadow-md w-fit sticky top-0">
+      <div className="flex-shrink-0 flex bg-company-blue text-white z-40 shadow-md w-fit sticky top-0">
         <div className="flex-shrink-0 flex border-r border-blue-800 bg-company-blue z-40">
             {visibleColumns.map((key) => {
-                const isFrozen = frozenColumns.includes(key);
-                const left = getStickyLeft(key);
+                const isFrozen = frozenColumns.includes(key); const left = getStickyLeft(key);
                 return (
                 <div key={key} style={{ width: colWidths[key], position: isFrozen ? 'sticky' : 'relative', left: isFrozen ? left : 'auto', zIndex: isFrozen ? 50 : 'auto' }} onClick={() => setSortConfig(prev => ({ key, direction: prev.key === key && prev.direction === 'asc' ? 'desc' : 'asc' }))} onContextMenu={(e) => handleHeaderContextMenu(e, key)} className={`relative p-2 font-bold text-[10px] border-r border-blue-800 flex items-center justify-center overflow-hidden whitespace-nowrap cursor-pointer hover:bg-blue-900 group ${isFrozen ? 'bg-company-blue shadow-[2px_0_5px_rgba(0,0,0,0.2)]' : ''}`}>
                     {labelMap[key]} {sortConfig.key === key && <span className="ml-1 text-[8px]">{sortConfig.direction === 'asc' ? '▲' : '▼'}</span>}
-                    {/* RESIZER HANDLE */}
-                    <div 
-                        className="absolute right-0 top-0 bottom-0 w-1 cursor-col-resize hover:bg-blue-400 z-50 group-hover:bg-blue-600/50"
-                        onMouseDown={(e) => handleResizeStart(e, key)}
-                        onClick={(e) => e.stopPropagation()}
-                    />
+                    <div className="absolute right-0 top-0 bottom-0 w-1 cursor-col-resize hover:bg-blue-400 z-50 group-hover:bg-blue-600/50" onMouseDown={(e) => handleResizeStart(e, key)} onClick={(e) => e.stopPropagation()}/>
                 </div>
             )})}
         </div>
         <div className="flex min-w-max">
-            {daysArray.map(day => (
-                <div key={day} className={`w-8 flex flex-col items-center justify-center border-r border-blue-800 ${isWeekendOrHoliday(day) ? 'bg-sky-500/30' : ''}`} title={getHolidayName(day)}>
-                    <span className="text-[9px] font-medium opacity-80 uppercase">{getDayLabel(day).substring(0, 1)}</span>
-                    <span className="text-[10px] font-bold">{String(day).padStart(2, '0')}</span>
-                </div>
-            ))}
+            {daysArray.map(day => (<div key={day} className={`w-8 flex flex-col items-center justify-center border-r border-blue-800 ${isWeekendOrHoliday(day) ? 'bg-sky-500/30' : ''}`} title={getHolidayName(day)}><span className="text-[9px] font-medium opacity-80 uppercase">{getDayLabel(day).substring(0, 1)}</span><span className="text-[10px] font-bold">{String(day).padStart(2, '0')}</span></div>))}
              <div className="w-16 flex-shrink-0 p-2 font-bold text-[10px] border-r border-blue-800 flex items-center justify-center bg-company-blue">FOLGAS</div>
              <div className="w-10 flex-shrink-0 p-2 font-bold text-[10px] border-r border-blue-800 flex items-center justify-center bg-company-blue">ST</div>
         </div>
       </div>
 
-      {/* BODY */}
-      <div className="flex flex-col min-w-max">
-        {sortedEmployees.map((employee, rowIndex) => {
+      {/* BODY - SCROLLABLE AREA */}
+      <div className="flex-1 flex flex-col min-w-max overflow-y-auto">
+        {paginatedEmployees.map((employee, idx) => {
+        const rowIndex = (currentPage - 1) * ITEMS_PER_PAGE + idx;
         const validation = validateSchedule(employee.id, currentSchedule, shifts, rules, employees);
-        // Stats
-        let daysOffCount = 0;
-        Object.values(currentSchedule.assignments[employee.id] || {}).forEach(sid => { if (shifts.find(s=>s.id===sid)?.category === 'dayoff') daysOffCount++; });
-        
-        // Target Days Off Logic
+        let daysOffCount = 0; Object.values(currentSchedule.assignments[employee.id] || {}).forEach(sid => { if (shifts.find(s=>s.id===sid)?.category === 'dayoff') daysOffCount++; });
         const targetDaysOff = calculateRequiredDaysOff(currentSchedule.month, currentSchedule.year, employee.shiftPattern);
-        // If extra days allowed, we allow surplus. If surplus is because of extra days config, it might be OK, 
-        // but user asked for RED alert if actual > target (assuming target is the strict required).
-        // Actually user said: "se o gestor habilitou a opção de 'Gerar folgas a mais'... e colocou 1 a mais... aparecer 06/05 ficando vermelho".
         const isExcessDaysOff = daysOffCount > targetDaysOff;
 
         return (
@@ -636,66 +421,21 @@ export const RosterGrid: React.FC<Props> = ({
                 <div draggable={!isReadOnly} onDragStart={(e) => handleDragStart(e, employee.id)} onDrop={(e) => handleDrop(e, employee.id)} className="flex-shrink-0 flex border-r border-slate-300 bg-white z-10 group-hover:bg-blue-50 cursor-move">
                     {visibleColumns.map(key => {
                         let val = key === 'scale' ? employee.shiftPattern : key === 'time' ? employee.workTime : key === 'position' ? employee.positionNumber : key === 'council' ? employee.categoryCode : key === 'bh' ? employee.bankHoursBalance : key === 'uf' ? employee.lastDayOff : (employee as any)[key];
-                        
                         let displayVal = val;
-                        // FORMAT DATE FOR UF (dd/mm)
-                        if (key === 'uf' && val) {
-                             const [year, month, day] = val.split('-');
-                             if (year && month && day) {
-                                 displayVal = `${day}/${month}`;
-                             }
-                        }
-
+                        if (key === 'uf' && val) { const [year, month, day] = val.split('-'); if (year && month && day) displayVal = `${day}/${month}`; }
                         const colorClass = key === 'bh' ? (val && val.startsWith('-') ? 'text-red-600' : 'text-green-600 font-bold') : 'text-slate-500';
                         const isFrozen = frozenColumns.includes(key); const left = getStickyLeft(key);
-                        
-                        const isShiftType = key === 'shiftType';
-                        const isUf = key === 'uf';
-                        const canEditCell = !isReadOnly && (isShiftType || isUf);
+                        const canEditCell = !isReadOnly && (key === 'shiftType' || key === 'uf');
 
                         return (
                             <div key={key} style={{ width: colWidths[key], position: isFrozen ? 'sticky' : 'relative', left: isFrozen ? left : 'auto', zIndex: isFrozen ? 30 : 'auto' }} className={`flex items-center px-2 border-r border-slate-100 overflow-hidden bg-white group-hover:bg-blue-50 ${isFrozen ? 'shadow-[2px_0_5px_rgba(0,0,0,0.05)]' : ''}`}>
                                 {canEditCell ? (
-                                    isUf ? (
-                                        <div className="relative w-full h-full flex items-center justify-between px-1 group/uf">
-                                            <span className={`bg-transparent border-none text-[10px] uppercase font-medium min-w-0 flex-1 ${val ? 'text-slate-600' : 'text-slate-300'}`}>
-                                                {displayVal || 'DD/MM'}
-                                            </span>
-                                            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="w-3 h-3 text-slate-400 group-hover/uf:text-blue-500 transition-colors">
-                                              <path fillRule="evenodd" d="M5.75 2a.75.75 0 01.75.75V4h7V2.75a.75.75 0 011.5 0V4h.25A2.75 2.75 0 0118 6.75v8.5A2.75 2.75 0 0115.25 18H4.75A2.75 2.75 0 012 15.25v-8.5A2.75 2.75 0 014.75 4H5V2.75A.75.75 0 015.75 2zm-1 5.5c-.69 0-1.25.56-1.25 1.25v6.5c0 .69.56 1.25 1.25 1.25h10.5c.69 0 1.25-.56 1.25-1.25v-6.5c0-.69-.56-1.25-1.25-1.25H4.75z" clipRule="evenodd" />
-                                            </svg>
-                                            <input 
-                                                type="date"
-                                                className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
-                                                value={val || ''}
-                                                onChange={(e) => {
-                                                     if (onUpdateEmployee) {
-                                                         onUpdateEmployee(employee.id, 'lastDayOff', e.target.value);
-                                                     }
-                                                }}
-                                            />
-                                        </div>
+                                    key === 'uf' ? (
+                                        <div className="relative w-full h-full flex items-center justify-between px-1 group/uf"><span className={`bg-transparent border-none text-[10px] uppercase font-medium min-w-0 flex-1 ${val ? 'text-slate-600' : 'text-slate-300'}`}>{displayVal || 'DD/MM'}</span><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="w-3 h-3 text-slate-400 group-hover/uf:text-blue-500 transition-colors"><path fillRule="evenodd" d="M5.75 2a.75.75 0 01.75.75V4h7V2.75a.75.75 0 011.5 0V4h.25A2.75 2.75 0 0118 6.75v8.5A2.75 2.75 0 0115.25 18H4.75A2.75 2.75 0 012 15.25v-8.5A2.75 2.75 0 014.75 4H5V2.75A.75.75 0 015.75 2zm-1 5.5c-.69 0-1.25.56-1.25 1.25v6.5c0 .69.56 1.25 1.25 1.25h10.5c.69 0 1.25-.56 1.25-1.25v-6.5c0-.69-.56-1.25-1.25-1.25H4.75z" clipRule="evenodd" /></svg><input type="date" className="absolute inset-0 w-full h-full opacity-0 cursor-pointer" value={val || ''} onChange={(e) => { if (onUpdateEmployee) onUpdateEmployee(employee.id, 'lastDayOff', e.target.value); }} /></div>
                                     ) : (
-                                        <input 
-                                            type="text"
-                                            className="w-full bg-transparent border-none text-[10px] uppercase font-medium focus:ring-1 focus:ring-blue-500 rounded px-1 min-w-0 h-full"
-                                            value={val || ''}
-                                            onChange={(e) => {
-                                                 if (onUpdateEmployee) {
-                                                     onUpdateEmployee(employee.id, 'shiftType', e.target.value);
-                                                 }
-                                            }}
-                                            onKeyDown={(e) => {
-                                                e.stopPropagation();
-                                                if (e.key === 'Enter') e.currentTarget.blur();
-                                            }}
-                                        />
+                                        <input type="text" className="w-full bg-transparent border-none text-[10px] uppercase font-medium focus:ring-1 focus:ring-blue-500 rounded px-1 min-w-0 h-full" value={val || ''} onChange={(e) => { if (onUpdateEmployee) onUpdateEmployee(employee.id, 'shiftType', e.target.value); }} onKeyDown={(e) => { e.stopPropagation(); if (e.key === 'Enter') e.currentTarget.blur(); }} />
                                     )
-                                ) : (
-                                    <span className={`text-[9px] truncate uppercase font-medium ${colorClass}`} title={val}>
-                                        {displayVal}
-                                    </span>
-                                )}
+                                ) : (<span className={`text-[9px] truncate uppercase font-medium ${colorClass}`} title={val}>{displayVal}</span>)}
                             </div>
                         )
                     })}
@@ -710,42 +450,24 @@ export const RosterGrid: React.FC<Props> = ({
                         const selected = isSelected(rowIndex, day);
                         const attachment = currentSchedule.attachments?.[employee.id]?.[dateKey];
                         const comment = currentSchedule.comments?.[employee.id]?.[dateKey];
-
                         return (
-                            <div key={day} onMouseDown={() => handleMouseDown(rowIndex, day)} onMouseEnter={() => handleMouseEnter(rowIndex, day)} onContextMenu={(e) => handleCellContextMenu(e, employee.id, day)}
-                                className={`w-8 h-full border-r border-slate-300 flex items-center justify-center text-[10px] font-bold select-none relative
-                                    ${!shift && isOff ? 'bg-sky-50' : ''} ${shift ? shift.color : 'bg-transparent'} ${shift?.textColor ? shift.textColor : 'text-slate-700'}
-                                    ${selected ? 'ring-2 ring-inset ring-blue-600 bg-blue-100/50' : ''} ${isReadOnly ? 'cursor-default' : 'cursor-pointer'}
-                                `}>
+                            <div key={day} onMouseDown={() => handleMouseDown(rowIndex, day)} onMouseEnter={() => handleMouseEnter(rowIndex, day)} onContextMenu={(e) => handleCellContextMenu(e, employee.id, day)} className={`w-8 h-full border-r border-slate-300 flex items-center justify-center text-[10px] font-bold select-none relative ${!shift && isOff ? 'bg-sky-50' : ''} ${shift ? shift.color : 'bg-transparent'} ${shift?.textColor ? shift.textColor : 'text-slate-700'} ${selected ? 'ring-2 ring-inset ring-blue-600 bg-blue-100/50' : ''} ${isReadOnly ? 'cursor-default' : 'cursor-pointer'}`}>
                                 {shift ? shift.code : ''}
                                 {attachment && <Tooltip content={`Anexo: ${attachment.name}`}><span className="absolute top-0 right-0 text-[8px] cursor-help">📎</span></Tooltip>}
                                 {comment && <Tooltip content={`Obs: ${comment}`}><span className="absolute bottom-0 right-0 w-0 h-0 border-l-[6px] border-l-transparent border-b-[6px] border-b-orange-500"></span></Tooltip>}
                             </div>
                         );
                     })}
-                     <div className={`w-16 flex-shrink-0 border-r border-slate-300 flex items-center justify-center text-[10px] bg-slate-50 font-bold ${isExcessDaysOff ? 'text-red-600' : 'text-slate-700'}`}>
-                         {String(daysOffCount).padStart(2, '0')}/{String(targetDaysOff).padStart(2, '0')}
-                     </div>
-                     <div className="w-10 flex-shrink-0 border-r border-slate-300 flex items-center justify-center bg-slate-50 relative group/st">
-                        {validation.valid ? <span className="text-green-500 font-bold">✔</span> : (
-                            <div className="relative flex justify-center w-full h-full items-center">
-                                <span className="text-red-500 font-bold cursor-help text-xs">⚠</span>
-                                {/* CUSTOM TOOLTIP FOR ST: Wider, Right-Aligned, White-space Pre-line */}
-                                <div className="absolute top-full right-0 mt-1 hidden group-hover/st:block z-[100] w-72 bg-gray-900 text-white text-[10px] p-2 rounded shadow-xl whitespace-pre-line text-left border border-gray-700">
-                                    {validation.messages.join('\n')}
-                                </div>
-                            </div>
-                        )}
-                    </div>
+                     <div className={`w-16 flex-shrink-0 border-r border-slate-300 flex items-center justify-center text-[10px] bg-slate-50 font-bold ${isExcessDaysOff ? 'text-red-600' : 'text-slate-700'}`}>{String(daysOffCount).padStart(2, '0')}/{String(targetDaysOff).padStart(2, '0')}</div>
+                     <div className="w-10 flex-shrink-0 border-r border-slate-300 flex items-center justify-center bg-slate-50 relative group/st">{validation.valid ? <span className="text-green-500 font-bold">✔</span> : (<div className="relative flex justify-center w-full h-full items-center"><span className="text-red-500 font-bold cursor-help text-xs">⚠</span><div className="absolute top-full right-0 mt-1 hidden group-hover/st:block z-[100] w-72 bg-gray-900 text-white text-[10px] p-2 rounded shadow-xl whitespace-pre-line text-left border border-gray-700">{validation.messages.join('\n')}</div></div>)}</div>
                 </div>
             </div>
-        );
-        })}
+        )})}
       </div>
       
-      {/* FOOTER */}
-      <div className="bg-slate-50 border-t border-slate-300 shadow-inner flex shrink-0 print:hidden w-fit sticky bottom-0 z-40" ref={footerScrollRef}>
-          <div className="flex h-10 border-b border-slate-200 w-full">
+      {/* FOOTER - STATS & PAGINATION */}
+      <div className="bg-slate-50 border-t border-slate-300 shadow-inner flex flex-col shrink-0 print:hidden sticky bottom-0 z-40">
+          <div className="flex h-10 border-b border-slate-200 w-full overflow-x-auto" ref={(el) => { if(el && gridContainerRef.current) el.scrollLeft = gridContainerRef.current.scrollLeft }}>
              <div className="flex-shrink-0 flex items-center justify-end px-2 font-bold text-[10px] text-slate-700 uppercase bg-slate-100 border-r border-slate-300 sticky left-0 z-40" style={{ width: totalLeftWidth }}>Total Ativos / Ideal</div>
              <div className="flex min-w-max"> 
                  {dailyStats.map(stat => {
@@ -755,6 +477,30 @@ export const RosterGrid: React.FC<Props> = ({
                      return (<div key={stat.day} className="w-8 flex flex-col items-center justify-center border-r border-slate-200 text-[9px]"><span className={`font-bold ${isDeficit ? 'text-red-600' : 'text-slate-800'}`}>{stat.totalActive}</span></div>)
                  })}
                  <div className="w-16 border-r border-slate-200 bg-slate-100"></div><div className="w-10 border-r border-slate-200 bg-slate-100"></div>
+             </div>
+          </div>
+          
+          {/* PAGINATION CONTROLS */}
+          <div className="flex items-center justify-between p-2 bg-white text-xs border-t border-slate-200">
+             <div className="text-slate-500">
+                 Mostrando {((currentPage - 1) * ITEMS_PER_PAGE) + 1} a {Math.min(currentPage * ITEMS_PER_PAGE, sortedEmployees.length)} de {sortedEmployees.length} colaboradores
+             </div>
+             <div className="flex items-center gap-2">
+                 <button 
+                    onClick={() => setCurrentPage(prev => Math.max(1, prev - 1))} 
+                    disabled={currentPage === 1}
+                    className="px-3 py-1 bg-slate-100 border rounded hover:bg-slate-200 disabled:opacity-50"
+                 >
+                     Anterior
+                 </button>
+                 <span className="font-bold text-slate-700">Página {currentPage} de {totalPages}</span>
+                 <button 
+                    onClick={() => setCurrentPage(prev => Math.min(totalPages, prev + 1))} 
+                    disabled={currentPage === totalPages}
+                    className="px-3 py-1 bg-slate-100 border rounded hover:bg-slate-200 disabled:opacity-50"
+                 >
+                     Próxima
+                 </button>
              </div>
           </div>
       </div>
