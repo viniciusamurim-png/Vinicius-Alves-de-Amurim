@@ -40,7 +40,7 @@ interface DailyStat {
   roleIdeals: Record<string, number>;
 }
 
-const ITEMS_PER_PAGE = 50; // Limite seguro para renderização suave
+const ITEMS_PER_PAGE = 50; 
 
 export const RosterGrid: React.FC<Props> = ({ 
     employees, shifts, currentSchedule, setSchedule, rules, staffingConfig, 
@@ -48,7 +48,11 @@ export const RosterGrid: React.FC<Props> = ({
 }) => {
   const [contextMenu, setContextMenu] = useState<ContextMenuState>({ visible: false, type: 'cell', x: 0, y: 0 });
   const menuRef = useRef<HTMLDivElement>(null);
-  const gridContainerRef = useRef<HTMLDivElement>(null);
+  
+  // Refs for scrolling synchronization
+  const gridContainerRef = useRef<HTMLDivElement>(null); 
+  const footerScrollRef = useRef<HTMLDivElement>(null); 
+  
   const internalClipboard = useRef<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const attachmentTarget = useRef<{employeeId: string, day: number} | null>(null);
@@ -144,17 +148,37 @@ export const RosterGrid: React.FC<Props> = ({
       return offset;
   }
 
+  // Sync Footer Scroll with Grid Scroll
+  const handleGridScroll = () => {
+    if (gridContainerRef.current && footerScrollRef.current) {
+        footerScrollRef.current.scrollLeft = gridContainerRef.current.scrollLeft;
+    }
+  };
+
   // --- CLICK OUTSIDE ---
   useEffect(() => {
     const handleBackgroundClick = (e: MouseEvent) => {
+      // If clicking inside the menu, do nothing
+      if (menuRef.current && menuRef.current.contains(e.target as Node)) {
+          return;
+      }
+
       if (gridContainerRef.current && gridContainerRef.current.contains(e.target as Node)) {
           const target = e.target as HTMLElement;
+          // Check if clicked exactly on the background container (the scroll area), not a cell
           if (target === gridContainerRef.current || target.classList.contains('roster-bg')) {
              setSelection(null);
              setFocusedCell(null);
              setContextMenu(prev => ({...prev, visible: false}));
+          } else {
+             // Clicked on a cell or header, let the specific handlers deal with it, 
+             // BUT if it's a left click, we generally want to close context menu unless it opened one
+             if (e.button === 0) { // Left click
+                 setContextMenu(prev => ({...prev, visible: false}));
+             }
           }
       } else {
+          // Clicked outside grid entirely
           setContextMenu(prev => ({...prev, visible: false}));
       }
     };
@@ -180,11 +204,14 @@ export const RosterGrid: React.FC<Props> = ({
   };
 
   // --- INTERACTION ---
-  const handleMouseDown = (rowIndex: number, day: number) => {
-    if (isReadOnly) return;
+  const handleMouseDown = (e: React.MouseEvent, rowIndex: number, day: number) => {
+    // Only allow Left Click (0) to start selection
+    if (e.button !== 0 || isReadOnly) return;
+    
     setIsSelecting(true);
     setSelection({ startRow: rowIndex, startCol: day, endRow: rowIndex, endCol: day });
     setFocusedCell({ empIndex: rowIndex, day });
+    // IMPORTANT: Close menu on left click
     setContextMenu(prev => ({...prev, visible: false}));
   };
 
@@ -193,6 +220,7 @@ export const RosterGrid: React.FC<Props> = ({
   };
 
   const handleMouseUp = () => setIsSelecting(false);
+  const handleMouseLeaveGrid = () => setIsSelecting(false);
 
   // Keyboard Navigation
   useEffect(() => {
@@ -335,16 +363,25 @@ export const RosterGrid: React.FC<Props> = ({
 
   // --- MENU HANDLERS ---
   const handleCellContextMenu = (e: React.MouseEvent, employeeId: string, day: number) => {
-      e.preventDefault(); if (isReadOnly) return;
+      e.preventDefault(); 
+      e.stopPropagation(); // Stop bubbling to prevent immediate closure or parent conflicts
+      if (isReadOnly) return;
+      
       const dateKey = `${currentSchedule.year}-${String(currentSchedule.month + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
       const shiftId = currentSchedule.assignments[employeeId]?.[dateKey];
       const shift = shifts.find(s => s.id === shiftId);
       let assignmentType: ContextMenuState['assignmentType'] = 'other';
       if (shift?.category === 'absence' || shift?.category === 'leave') assignmentType = 'leave';
-      setContextMenu({ visible: true, type: 'cell', x: e.pageX, y: e.pageY, employeeId, day, assignmentType, hasAttachment: !!currentSchedule.attachments?.[employeeId]?.[dateKey], isCommentMenu: false });
+      
+      setContextMenu({ visible: true, type: 'cell', x: e.clientX, y: e.clientY, employeeId, day, assignmentType, hasAttachment: !!currentSchedule.attachments?.[employeeId]?.[dateKey], isCommentMenu: false });
   };
 
-  const handleHeaderContextMenu = (e: React.MouseEvent, key: ExtendedColumnKey) => { e.preventDefault(); setContextMenu({ visible: true, type: 'header', x: e.pageX, y: e.pageY, columnKey: key }); };
+  const handleHeaderContextMenu = (e: React.MouseEvent, key: ExtendedColumnKey) => { 
+      e.preventDefault();
+      e.stopPropagation();
+      setContextMenu({ visible: true, type: 'header', x: e.clientX, y: e.clientY, columnKey: key }); 
+  };
+  
   const handleAttachFile = () => { if(contextMenu.employeeId && contextMenu.day) { attachmentTarget.current = { employeeId: contextMenu.employeeId, day: contextMenu.day }; fileInputRef.current?.click(); } setContextMenu(prev => ({...prev, visible: false})); };
   const handleAddComment = (comment: string) => { if (contextMenu.employeeId && contextMenu.day) { const dateKey = `${currentSchedule.year}-${String(currentSchedule.month + 1).padStart(2, '0')}-${String(contextMenu.day).padStart(2, '0')}`; setSchedule(prev => ({ ...prev, comments: { ...prev.comments, [contextMenu.employeeId!]: { ...(prev.comments?.[contextMenu.employeeId!] || {}), [dateKey]: comment } } })); } setContextMenu(prev => ({...prev, visible: false, isCommentMenu: false})); }
   const handleDownloadAttachment = () => { if(contextMenu.employeeId && contextMenu.day) { const dateKey = `${currentSchedule.year}-${String(currentSchedule.month + 1).padStart(2, '0')}-${String(contextMenu.day).padStart(2, '0')}`; const attachment = currentSchedule.attachments?.[contextMenu.employeeId]?.[dateKey]; if (attachment) { const link = document.createElement("a"); link.href = attachment.data; link.download = attachment.name; document.body.appendChild(link); link.click(); document.body.removeChild(link); } } setContextMenu(prev => ({...prev, visible: false})); }
@@ -357,13 +394,14 @@ export const RosterGrid: React.FC<Props> = ({
   const labelMap: Record<ExtendedColumnKey, string> = { name: 'NOME COLABORADOR', id: 'ID', role: 'CARGO', cpf: 'CPF', scale: 'ESCALA', time: 'HORÁRIO', shiftType: 'TURNO', position: 'Nº POSIÇÃO', council: 'REG. CONSELHO', bh: 'BH', uf: 'UF' };
 
   return (
-    <div ref={gridContainerRef} className="roster-bg bg-white rounded shadow-sm border border-slate-300 flex flex-col h-full w-full overflow-hidden select-none relative print:border-none print:shadow-none" onMouseUp={handleMouseUp}>
-      {/* Hidden Columns Button */}
-      {hiddenColumns.length > 0 && <button onClick={() => setHiddenColumns([])} title="Restaurar Colunas" className="absolute top-1 left-1 z-[70] bg-blue-100 text-blue-700 p-1.5 rounded-full shadow hover:bg-blue-200 print:hidden transition-all w-fit h-fit"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="w-4 h-4"><path d="M10 12.5a2.5 2.5 0 100-5 2.5 2.5 0 000 5z" /><path fillRule="evenodd" d="M.664 10.59a1.651 1.651 0 010-1.186A10.004 10.004 0 0110 3c4.257 0 7.893 2.66 9.336 6.41.147.381.146.804 0 1.186A10.004 10.004 0 0110 17c-4.257 0-7.893-2.66-9.336-6.41zM14 10a4 4 0 11-8 0 4 4 0 018 0z" clipRule="evenodd" /></svg></button>}
+    <div className="roster-bg bg-white rounded shadow-sm border border-slate-300 flex flex-col h-full w-full overflow-hidden select-none relative print:border-none print:shadow-none" onMouseUp={handleMouseUp} onMouseLeave={handleMouseLeaveGrid}>
+      {/* Hidden Columns Button - Highest Z-Index in Grid Context */}
+      {hiddenColumns.length > 0 && <button onClick={() => setHiddenColumns([])} title="Restaurar Colunas" className="absolute top-1 left-1 z-[90] bg-blue-100 text-blue-700 p-1.5 rounded-full shadow hover:bg-blue-200 print:hidden transition-all w-fit h-fit"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="w-4 h-4"><path d="M10 12.5a2.5 2.5 0 100-5 2.5 2.5 0 000 5z" /><path fillRule="evenodd" d="M.664 10.59a1.651 1.651 0 010-1.186A10.004 10.004 0 0110 3c4.257 0 7.893 2.66 9.336 6.41.147.381.146.804 0 1.186A10.004 10.004 0 0110 17c-4.257 0-7.893-2.66-9.336-6.41zM14 10a4 4 0 11-8 0 4 4 0 018 0z" clipRule="evenodd" /></svg></button>}
       <input type="file" hidden ref={fileInputRef} accept=".png,.jpg,.jpeg,.pdf" onChange={handleFileSelected} />
 
+      {/* Context Menu - Fixed Position to avoid clipping */}
       {contextMenu.visible && (
-          <div ref={menuRef} className="fixed z-[100] bg-white shadow-xl rounded-lg border border-slate-200 py-1 min-w-[180px]" style={{ top: contextMenu.y, left: contextMenu.x }}>
+          <div ref={menuRef} className="fixed z-[9999] bg-white shadow-xl rounded-lg border border-slate-200 py-1 min-w-[180px]" style={{ top: Math.min(contextMenu.y, window.innerHeight - 300), left: Math.min(contextMenu.x, window.innerWidth - 200) }}>
               {contextMenu.type === 'header' ? (
                   <>
                     <button onClick={() => { if(contextMenu.columnKey) { setFrozenColumns(prev => prev.includes(contextMenu.columnKey as any) ? prev.filter(k=>k!==contextMenu.columnKey) : [...prev, contextMenu.columnKey as any]); setContextMenu(prev=>({...prev, visible:false})); }}} className="w-full text-left px-4 py-2 hover:bg-slate-50 text-xs font-bold text-slate-700">Congelar/Descongelar</button>
@@ -387,87 +425,114 @@ export const RosterGrid: React.FC<Props> = ({
           </div>
       )}
 
-      {/* HEADER */}
-      <div className="flex-shrink-0 flex bg-company-blue text-white z-40 shadow-md w-fit sticky top-0">
-        <div className="flex-shrink-0 flex border-r border-blue-800 bg-company-blue z-40">
-            {visibleColumns.map((key) => {
-                const isFrozen = frozenColumns.includes(key); const left = getStickyLeft(key);
-                return (
-                <div key={key} style={{ width: colWidths[key], position: isFrozen ? 'sticky' : 'relative', left: isFrozen ? left : 'auto', zIndex: isFrozen ? 50 : 'auto' }} onClick={() => setSortConfig(prev => ({ key, direction: prev.key === key && prev.direction === 'asc' ? 'desc' : 'asc' }))} onContextMenu={(e) => handleHeaderContextMenu(e, key)} className={`relative p-2 font-bold text-[10px] border-r border-blue-800 flex items-center justify-center overflow-hidden whitespace-nowrap cursor-pointer hover:bg-blue-900 group ${isFrozen ? 'bg-company-blue shadow-[2px_0_5px_rgba(0,0,0,0.2)]' : ''}`}>
-                    {labelMap[key]} {sortConfig.key === key && <span className="ml-1 text-[8px]">{sortConfig.direction === 'asc' ? '▲' : '▼'}</span>}
-                    <div className="absolute right-0 top-0 bottom-0 w-1 cursor-col-resize hover:bg-blue-400 z-50 group-hover:bg-blue-600/50" onMouseDown={(e) => handleResizeStart(e, key)} onClick={(e) => e.stopPropagation()}/>
+      {/* UNIFIED SCROLLABLE AREA */}
+      <div 
+        ref={gridContainerRef}
+        className="flex-1 overflow-auto w-full relative"
+        onScroll={handleGridScroll}
+      >
+        {/* HEADER - STICKY TOP */}
+        <div className="sticky top-0 z-[60] bg-company-blue text-white shadow-md w-fit flex min-w-max">
+            <div className="flex-shrink-0 flex border-r border-blue-800 bg-company-blue z-50">
+                {visibleColumns.map((key) => {
+                    const isFrozen = frozenColumns.includes(key); const left = getStickyLeft(key);
+                    return (
+                    <div key={key} style={{ width: colWidths[key], position: isFrozen ? 'sticky' : 'relative', left: isFrozen ? left : 'auto', zIndex: isFrozen ? 60 : 'auto' }} onClick={() => setSortConfig(prev => ({ key, direction: prev.key === key && prev.direction === 'asc' ? 'desc' : 'asc' }))} onContextMenu={(e) => handleHeaderContextMenu(e, key)} className={`relative p-2 font-bold text-[10px] border-r border-blue-800 flex items-center justify-center overflow-hidden whitespace-nowrap cursor-pointer hover:bg-blue-900 group ${isFrozen ? 'bg-company-blue shadow-[2px_0_5px_rgba(0,0,0,0.2)]' : ''}`}>
+                        {labelMap[key]} {sortConfig.key === key && <span className="ml-1 text-[8px]">{sortConfig.direction === 'asc' ? '▲' : '▼'}</span>}
+                        <div className="absolute right-0 top-0 bottom-0 w-1 cursor-col-resize hover:bg-blue-400 z-50 group-hover:bg-blue-600/50" onMouseDown={(e) => handleResizeStart(e, key)} onClick={(e) => e.stopPropagation()}/>
+                    </div>
+                )})}
+            </div>
+            <div className="flex min-w-max">
+                {daysArray.map(day => (<div key={day} className={`w-8 flex flex-col items-center justify-center border-r border-blue-800 ${isWeekendOrHoliday(day) ? 'bg-sky-500/30' : ''}`} title={getHolidayName(day)}><span className="text-[9px] font-medium opacity-80 uppercase">{getDayLabel(day).substring(0, 1)}</span><span className="text-[10px] font-bold">{String(day).padStart(2, '0')}</span></div>))}
+                 <div className="w-16 flex-shrink-0 p-2 font-bold text-[10px] border-r border-blue-800 flex items-center justify-center bg-company-blue">FOLGAS</div>
+                 <div className="w-10 flex-shrink-0 p-2 font-bold text-[10px] border-r border-blue-800 flex items-center justify-center bg-company-blue">ST</div>
+            </div>
+        </div>
+
+        {/* BODY */}
+        <div className="flex flex-col min-w-max">
+            {paginatedEmployees.map((employee, idx) => {
+            const rowIndex = (currentPage - 1) * ITEMS_PER_PAGE + idx;
+            const validation = validateSchedule(employee.id, currentSchedule, shifts, rules, employees);
+            let daysOffCount = 0; Object.values(currentSchedule.assignments[employee.id] || {}).forEach(sid => { if (shifts.find(s=>s.id===sid)?.category === 'dayoff') daysOffCount++; });
+            const targetDaysOff = calculateRequiredDaysOff(currentSchedule.month, currentSchedule.year, employee.shiftPattern);
+            const isExcessDaysOff = daysOffCount > targetDaysOff;
+
+            return (
+                <div key={employee.id} className="flex border-b border-slate-300 bg-white hover:bg-blue-50 transition-colors group h-9">
+                    {/* Left Cols */}
+                    <div draggable={!isReadOnly} onDragStart={(e) => handleDragStart(e, employee.id)} onDrop={(e) => handleDrop(e, employee.id)} onDragOver={(e) => e.preventDefault()} className="flex-shrink-0 flex border-r border-slate-300 bg-white z-10 group-hover:bg-blue-50 cursor-move">
+                        {visibleColumns.map(key => {
+                            let val = key === 'scale' ? employee.shiftPattern : key === 'time' ? employee.workTime : key === 'position' ? employee.positionNumber : key === 'council' ? employee.categoryCode : key === 'bh' ? employee.bankHoursBalance : key === 'uf' ? employee.lastDayOff : (employee as any)[key];
+                            let displayVal = val;
+                            if (key === 'uf' && val) { const [year, month, day] = val.split('-'); if (year && month && day) displayVal = `${day}/${month}`; }
+                            const colorClass = key === 'bh' ? (val && val.startsWith('-') ? 'text-red-600' : 'text-green-600 font-bold') : 'text-slate-500';
+                            const isFrozen = frozenColumns.includes(key); const left = getStickyLeft(key);
+                            const canEditCell = !isReadOnly && (key === 'shiftType' || key === 'uf');
+
+                            return (
+                                <div key={key} style={{ width: colWidths[key], position: isFrozen ? 'sticky' : 'relative', left: isFrozen ? left : 'auto', zIndex: isFrozen ? 50 : 'auto' }} className={`flex items-center px-2 border-r border-slate-100 overflow-hidden bg-white group-hover:bg-blue-50 ${isFrozen ? 'shadow-[2px_0_5px_rgba(0,0,0,0.05)]' : ''}`}>
+                                    {canEditCell ? (
+                                        key === 'uf' ? (
+                                            <div className="relative w-full h-full flex items-center justify-between px-1 group/uf"><span className={`bg-transparent border-none text-[10px] uppercase font-medium min-w-0 flex-1 ${val ? 'text-slate-600' : 'text-slate-300'}`}>{displayVal || 'DD/MM'}</span><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="w-3 h-3 text-slate-400 group-hover/uf:text-blue-500 transition-colors"><path fillRule="evenodd" d="M5.75 2a.75.75 0 01.75.75V4h7V2.75a.75.75 0 011.5 0V4h.25A2.75 2.75 0 0118 6.75v8.5A2.75 2.75 0 0115.25 18H4.75A2.75 2.75 0 012 15.25v-8.5A2.75 2.75 0 014.75 4H5V2.75A.75.75 0 015.75 2zm-1 5.5c-.69 0-1.25.56-1.25 1.25v6.5c0 .69.56 1.25 1.25 1.25h10.5c.69 0 1.25-.56 1.25-1.25v-6.5c0-.69-.56-1.25-1.25-1.25H4.75z" clipRule="evenodd" /></svg><input type="date" className="absolute inset-0 w-full h-full opacity-0 cursor-pointer" value={val || ''} onChange={(e) => { if (onUpdateEmployee) onUpdateEmployee(employee.id, 'lastDayOff', e.target.value); }} /></div>
+                                        ) : (
+                                            <input type="text" className="w-full bg-transparent border-none text-[10px] uppercase font-medium focus:ring-1 focus:ring-blue-500 rounded px-1 min-w-0 h-full" value={val || ''} onChange={(e) => { if (onUpdateEmployee) onUpdateEmployee(employee.id, 'shiftType', e.target.value); }} onKeyDown={(e) => { e.stopPropagation(); if (e.key === 'Enter') e.currentTarget.blur(); }} />
+                                        )
+                                    ) : (<span className={`text-[9px] truncate uppercase font-medium ${colorClass}`} title={val}>{displayVal}</span>)}
+                                </div>
+                            )
+                        })}
+                    </div>
+                    {/* Grid */}
+                    <div className="flex">
+                        {daysArray.map(day => {
+                            const dateKey = `${currentSchedule.year}-${String(currentSchedule.month + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+                            const shiftId = currentSchedule.assignments[employee.id]?.[dateKey];
+                            const shift = shifts.find(s => s.id === shiftId);
+                            const isOff = isWeekendOrHoliday(day);
+                            const selected = isSelected(rowIndex, day);
+                            const attachment = currentSchedule.attachments?.[employee.id]?.[dateKey];
+                            const comment = currentSchedule.comments?.[employee.id]?.[dateKey];
+                            const isViolation = validation.invalidDays.includes(day);
+
+                            return (
+                                <div key={day} onMouseDown={(e) => handleMouseDown(e, rowIndex, day)} onMouseEnter={() => handleMouseEnter(rowIndex, day)} onContextMenu={(e) => handleCellContextMenu(e, employee.id, day)} 
+                                className={`w-8 h-full flex items-center justify-center text-[10px] font-bold select-none relative 
+                                    ${isViolation ? 'border border-red-400 z-10' : 'border-r border-slate-300'}
+                                    ${!shift && isOff ? 'bg-sky-50' : ''} 
+                                    ${shift ? shift.color : 'bg-transparent'} 
+                                    ${shift?.textColor ? shift.textColor : 'text-slate-700'} 
+                                    ${selected ? 'ring-2 ring-inset ring-blue-600 bg-blue-100/50' : ''} 
+                                    ${isReadOnly ? 'cursor-default' : 'cursor-pointer'}`}>
+                                    {shift ? shift.code : ''}
+                                    {attachment && <Tooltip content={`Anexo: ${attachment.name}`}><span className="absolute top-0 right-0 text-[8px] cursor-help">📎</span></Tooltip>}
+                                    {comment && <Tooltip content={`Obs: ${comment}`}><span className="absolute bottom-0 right-0 w-0 h-0 border-l-[6px] border-l-transparent border-b-[6px] border-b-orange-500"></span></Tooltip>}
+                                </div>
+                            );
+                        })}
+                         <div className={`w-16 flex-shrink-0 border-r border-slate-300 flex items-center justify-center text-[10px] bg-slate-50 font-bold ${isExcessDaysOff ? 'text-red-600' : 'text-slate-700'}`}>{String(daysOffCount).padStart(2, '0')}/{String(targetDaysOff).padStart(2, '0')}</div>
+                         <div className="w-10 flex-shrink-0 border-r border-slate-300 flex items-center justify-center bg-slate-50 relative group/st">
+                             {validation.valid ? <span className="text-green-500 font-bold">✔</span> : (
+                                <div className="relative flex justify-center w-full h-full items-center">
+                                    <span className="text-red-500 font-bold cursor-help text-xs">⚠</span>
+                                    {/* Tooltip fixed to left to avoid overflow off screen */}
+                                    <div className="absolute top-full right-0 mt-1 hidden group-hover/st:block z-[9999] w-72 bg-gray-900 text-white text-[10px] p-2 rounded shadow-xl whitespace-pre-line text-left border border-gray-700">
+                                        {validation.messages.join('\n')}
+                                    </div>
+                                </div>
+                             )}
+                        </div>
+                    </div>
                 </div>
             )})}
         </div>
-        <div className="flex min-w-max">
-            {daysArray.map(day => (<div key={day} className={`w-8 flex flex-col items-center justify-center border-r border-blue-800 ${isWeekendOrHoliday(day) ? 'bg-sky-500/30' : ''}`} title={getHolidayName(day)}><span className="text-[9px] font-medium opacity-80 uppercase">{getDayLabel(day).substring(0, 1)}</span><span className="text-[10px] font-bold">{String(day).padStart(2, '0')}</span></div>))}
-             <div className="w-16 flex-shrink-0 p-2 font-bold text-[10px] border-r border-blue-800 flex items-center justify-center bg-company-blue">FOLGAS</div>
-             <div className="w-10 flex-shrink-0 p-2 font-bold text-[10px] border-r border-blue-800 flex items-center justify-center bg-company-blue">ST</div>
-        </div>
-      </div>
-
-      {/* BODY - SCROLLABLE AREA */}
-      <div className="flex-1 flex flex-col min-w-max overflow-y-auto">
-        {paginatedEmployees.map((employee, idx) => {
-        const rowIndex = (currentPage - 1) * ITEMS_PER_PAGE + idx;
-        const validation = validateSchedule(employee.id, currentSchedule, shifts, rules, employees);
-        let daysOffCount = 0; Object.values(currentSchedule.assignments[employee.id] || {}).forEach(sid => { if (shifts.find(s=>s.id===sid)?.category === 'dayoff') daysOffCount++; });
-        const targetDaysOff = calculateRequiredDaysOff(currentSchedule.month, currentSchedule.year, employee.shiftPattern);
-        const isExcessDaysOff = daysOffCount > targetDaysOff;
-
-        return (
-            <div key={employee.id} className="flex border-b border-slate-300 bg-white hover:bg-blue-50 transition-colors group h-9">
-                {/* Left Cols */}
-                <div draggable={!isReadOnly} onDragStart={(e) => handleDragStart(e, employee.id)} onDrop={(e) => handleDrop(e, employee.id)} className="flex-shrink-0 flex border-r border-slate-300 bg-white z-10 group-hover:bg-blue-50 cursor-move">
-                    {visibleColumns.map(key => {
-                        let val = key === 'scale' ? employee.shiftPattern : key === 'time' ? employee.workTime : key === 'position' ? employee.positionNumber : key === 'council' ? employee.categoryCode : key === 'bh' ? employee.bankHoursBalance : key === 'uf' ? employee.lastDayOff : (employee as any)[key];
-                        let displayVal = val;
-                        if (key === 'uf' && val) { const [year, month, day] = val.split('-'); if (year && month && day) displayVal = `${day}/${month}`; }
-                        const colorClass = key === 'bh' ? (val && val.startsWith('-') ? 'text-red-600' : 'text-green-600 font-bold') : 'text-slate-500';
-                        const isFrozen = frozenColumns.includes(key); const left = getStickyLeft(key);
-                        const canEditCell = !isReadOnly && (key === 'shiftType' || key === 'uf');
-
-                        return (
-                            <div key={key} style={{ width: colWidths[key], position: isFrozen ? 'sticky' : 'relative', left: isFrozen ? left : 'auto', zIndex: isFrozen ? 30 : 'auto' }} className={`flex items-center px-2 border-r border-slate-100 overflow-hidden bg-white group-hover:bg-blue-50 ${isFrozen ? 'shadow-[2px_0_5px_rgba(0,0,0,0.05)]' : ''}`}>
-                                {canEditCell ? (
-                                    key === 'uf' ? (
-                                        <div className="relative w-full h-full flex items-center justify-between px-1 group/uf"><span className={`bg-transparent border-none text-[10px] uppercase font-medium min-w-0 flex-1 ${val ? 'text-slate-600' : 'text-slate-300'}`}>{displayVal || 'DD/MM'}</span><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="w-3 h-3 text-slate-400 group-hover/uf:text-blue-500 transition-colors"><path fillRule="evenodd" d="M5.75 2a.75.75 0 01.75.75V4h7V2.75a.75.75 0 011.5 0V4h.25A2.75 2.75 0 0118 6.75v8.5A2.75 2.75 0 0115.25 18H4.75A2.75 2.75 0 012 15.25v-8.5A2.75 2.75 0 014.75 4H5V2.75A.75.75 0 015.75 2zm-1 5.5c-.69 0-1.25.56-1.25 1.25v6.5c0 .69.56 1.25 1.25 1.25h10.5c.69 0 1.25-.56 1.25-1.25v-6.5c0-.69-.56-1.25-1.25-1.25H4.75z" clipRule="evenodd" /></svg><input type="date" className="absolute inset-0 w-full h-full opacity-0 cursor-pointer" value={val || ''} onChange={(e) => { if (onUpdateEmployee) onUpdateEmployee(employee.id, 'lastDayOff', e.target.value); }} /></div>
-                                    ) : (
-                                        <input type="text" className="w-full bg-transparent border-none text-[10px] uppercase font-medium focus:ring-1 focus:ring-blue-500 rounded px-1 min-w-0 h-full" value={val || ''} onChange={(e) => { if (onUpdateEmployee) onUpdateEmployee(employee.id, 'shiftType', e.target.value); }} onKeyDown={(e) => { e.stopPropagation(); if (e.key === 'Enter') e.currentTarget.blur(); }} />
-                                    )
-                                ) : (<span className={`text-[9px] truncate uppercase font-medium ${colorClass}`} title={val}>{displayVal}</span>)}
-                            </div>
-                        )
-                    })}
-                </div>
-                {/* Grid */}
-                <div className="flex">
-                    {daysArray.map(day => {
-                        const dateKey = `${currentSchedule.year}-${String(currentSchedule.month + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
-                        const shiftId = currentSchedule.assignments[employee.id]?.[dateKey];
-                        const shift = shifts.find(s => s.id === shiftId);
-                        const isOff = isWeekendOrHoliday(day);
-                        const selected = isSelected(rowIndex, day);
-                        const attachment = currentSchedule.attachments?.[employee.id]?.[dateKey];
-                        const comment = currentSchedule.comments?.[employee.id]?.[dateKey];
-                        return (
-                            <div key={day} onMouseDown={() => handleMouseDown(rowIndex, day)} onMouseEnter={() => handleMouseEnter(rowIndex, day)} onContextMenu={(e) => handleCellContextMenu(e, employee.id, day)} className={`w-8 h-full border-r border-slate-300 flex items-center justify-center text-[10px] font-bold select-none relative ${!shift && isOff ? 'bg-sky-50' : ''} ${shift ? shift.color : 'bg-transparent'} ${shift?.textColor ? shift.textColor : 'text-slate-700'} ${selected ? 'ring-2 ring-inset ring-blue-600 bg-blue-100/50' : ''} ${isReadOnly ? 'cursor-default' : 'cursor-pointer'}`}>
-                                {shift ? shift.code : ''}
-                                {attachment && <Tooltip content={`Anexo: ${attachment.name}`}><span className="absolute top-0 right-0 text-[8px] cursor-help">📎</span></Tooltip>}
-                                {comment && <Tooltip content={`Obs: ${comment}`}><span className="absolute bottom-0 right-0 w-0 h-0 border-l-[6px] border-l-transparent border-b-[6px] border-b-orange-500"></span></Tooltip>}
-                            </div>
-                        );
-                    })}
-                     <div className={`w-16 flex-shrink-0 border-r border-slate-300 flex items-center justify-center text-[10px] bg-slate-50 font-bold ${isExcessDaysOff ? 'text-red-600' : 'text-slate-700'}`}>{String(daysOffCount).padStart(2, '0')}/{String(targetDaysOff).padStart(2, '0')}</div>
-                     <div className="w-10 flex-shrink-0 border-r border-slate-300 flex items-center justify-center bg-slate-50 relative group/st">{validation.valid ? <span className="text-green-500 font-bold">✔</span> : (<div className="relative flex justify-center w-full h-full items-center"><span className="text-red-500 font-bold cursor-help text-xs">⚠</span><div className="absolute top-full right-0 mt-1 hidden group-hover/st:block z-[100] w-72 bg-gray-900 text-white text-[10px] p-2 rounded shadow-xl whitespace-pre-line text-left border border-gray-700">{validation.messages.join('\n')}</div></div>)}</div>
-                </div>
-            </div>
-        )})}
       </div>
       
       {/* FOOTER - STATS & PAGINATION */}
-      <div className="bg-slate-50 border-t border-slate-300 shadow-inner flex flex-col shrink-0 print:hidden sticky bottom-0 z-40">
-          <div className="flex h-10 border-b border-slate-200 w-full overflow-x-auto" ref={(el) => { if(el && gridContainerRef.current) el.scrollLeft = gridContainerRef.current.scrollLeft }}>
+      <div className="bg-slate-50 border-t border-slate-300 shadow-inner flex flex-col shrink-0 print:hidden z-50">
+          <div className="flex h-10 border-b border-slate-200 w-full overflow-hidden" ref={footerScrollRef}>
+             {/* Sticky label in Footer (Synced to grid's frozen columns width) */}
              <div className="flex-shrink-0 flex items-center justify-end px-2 font-bold text-[10px] text-slate-700 uppercase bg-slate-100 border-r border-slate-300 sticky left-0 z-40" style={{ width: totalLeftWidth }}>Total Ativos / Ideal</div>
              <div className="flex min-w-max"> 
                  {dailyStats.map(stat => {

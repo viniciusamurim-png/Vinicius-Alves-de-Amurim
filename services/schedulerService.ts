@@ -77,41 +77,60 @@ export const validateSchedule = (
   shifts: Shift[],
   rules?: AIRulesConfig,
   employees?: Employee[] // Pass employees to get UF
-): { valid: boolean, messages: string[] } => {
+): { valid: boolean, messages: string[], invalidDays: number[] } => {
   const messages: string[] = [];
+  const invalidDays: number[] = [];
+  
   const assignments = schedule.assignments[employeeId] || {};
   const daysInMonth = getDaysInMonth(schedule.month, schedule.year);
   
-  const maxConsecutive = rules?.maxConsecutiveDays || 6;
-  
-  // Find employee to get UF
+  // Find employee to get UF and Pattern
   const emp = employees?.find(e => e.id === employeeId);
-  let consecutiveWorkDays = getInitialConsecutiveDays(emp?.lastDayOff, schedule.month, schedule.year);
+  if (!emp) return { valid: false, messages: ["Colaborador não encontrado"], invalidDays: [] };
+
+  const maxConsecutive = rules?.maxConsecutiveDays || 6;
+  let consecutiveWorkDays = getInitialConsecutiveDays(emp.lastDayOff, schedule.month, schedule.year);
+  
+  let actualDaysOffCount = 0;
 
   for (let day = 1; day <= daysInMonth; day++) {
     const dateKey = `${schedule.year}-${String(schedule.month + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
     const shiftId = assignments[dateKey];
-    
     const shift = shifts.find(s => s.id === shiftId);
     
-    // If it's a generated 'F' or 'DSR', reset counter.
-    if (shift && shift.isDayOff) {
+    // LOGIC: Empty cell OR non-dayoff shift = Work Day
+    const isDayOff = shift && shift.isDayOff;
+
+    if (isDayOff) {
       consecutiveWorkDays = 0;
-    } else if (shift && !shift.isDayOff) {
-      // Explicit work shift
-      consecutiveWorkDays++;
+      actualDaysOffCount++;
     } else {
-        // Empty cell logic treated as work day for calculation safety if strict
-        consecutiveWorkDays++;
+      // Work day (Explicit shift or Empty cell)
+      consecutiveWorkDays++;
     }
 
     if (consecutiveWorkDays > maxConsecutive) {
-      messages.push(`CLT: Mais de ${maxConsecutive} dias consecutivos (Dia ${day}).`);
-      consecutiveWorkDays = 0; 
+      // ONLY flag the exact day that breaks the limit (e.g., the 7th day)
+      // Do NOT flag subsequent days (8th, 9th) to avoid clutter, as the error is at the 7th day.
+      if (consecutiveWorkDays === maxConsecutive + 1) {
+          invalidDays.push(day);
+          messages.push(`CLT: Mais de ${maxConsecutive} dias consecutivos (Dia ${day}).`);
+      }
     }
   }
 
-  return { valid: messages.length === 0, messages };
+  // Validate Total Days Off Count
+  // IMPORTANT: If 0 days off, force error regardless of target calculation (CLT safety)
+  const targetDaysOff = calculateRequiredDaysOff(schedule.month, schedule.year, emp.shiftPattern);
+  
+  if (actualDaysOffCount === 0 && daysInMonth > 0) {
+      messages.push("Nenhuma folga atribuída.");
+  } else if (actualDaysOffCount < targetDaysOff) {
+      const diff = targetDaysOff - actualDaysOffCount;
+      messages.push(`Faltam ${diff} dia(s) para atingir a meta de ${targetDaysOff}.`);
+  }
+
+  return { valid: messages.length === 0, messages, invalidDays };
 };
 
 const BATCH_SIZE = 15; // Process 15 employees at a time to avoid token limits

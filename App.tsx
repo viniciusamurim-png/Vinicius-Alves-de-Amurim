@@ -1,3 +1,4 @@
+
 import React, { useState, useMemo, useEffect, useCallback, useRef } from 'react';
 import { INITIAL_EMPLOYEES, INITIAL_SHIFTS, MONTH_NAMES, INITIAL_UNITS, INITIAL_SECTORS, INITIAL_SHIFT_TYPES } from './constants.ts';
 import { Employee, MonthlySchedule, Shift, AIRulesConfig, StaffingConfig, User } from './types.ts';
@@ -79,6 +80,7 @@ const App: React.FC = () => {
   const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
   const [isSyncing, setIsSyncing] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
+  const [showSyncConfirm, setShowSyncConfirm] = useState(false); // New state for sync confirmation
 
   const setSchedule = useCallback((value: React.SetStateAction<MonthlySchedule>) => {
       setScheduleState(prev => {
@@ -166,13 +168,6 @@ const App: React.FC = () => {
     };
     loadData();
   }, []);
-
-  // Fetch from Google Sheets on Load (if logged in)
-  useEffect(() => {
-      if (currentUser) {
-          handleSync();
-      }
-  }, [currentUser]);
 
   const handleSync = async () => {
       setIsSyncing(true);
@@ -451,7 +446,7 @@ const App: React.FC = () => {
             <div className="flex items-center gap-3 shrink-0 ml-4">
                {isAdmin && (
                    <Tooltip content="Sincronizar Cadastros">
-                       <button onClick={handleSync} className={`p-2 rounded-full hover:bg-blue-800 transition-colors ${isSyncing ? 'text-blue-300' : 'text-white'}`}>
+                       <button onClick={() => setShowSyncConfirm(true)} className={`p-2 rounded-full hover:bg-blue-800 transition-colors ${isSyncing ? 'text-blue-300' : 'text-white'}`}>
                            <RefreshIcon spinning={isSyncing} />
                        </button>
                    </Tooltip>
@@ -572,6 +567,17 @@ const App: React.FC = () => {
         message={`ATENÇÃO: Você está prestes a limpar a escala de ${clearTargetIds.length === 0 ? 'TODOS os colaboradores visíveis' : clearTargetIds.length + ' colaboradores selecionados'} para este mês. Isso apagará turnos, anexos e observações. Deseja realmente continuar?`}
         confirmText="Limpar Agora"
         isDangerous={true}
+      />
+
+      {/* SYNC CONFIRMATION MODAL */}
+      <ConfirmationModal
+        isOpen={showSyncConfirm}
+        onClose={() => setShowSyncConfirm(false)}
+        onConfirm={handleSync}
+        title="Confirmar Sincronização"
+        message="Deseja atualizar a lista de colaboradores via Google Sheets? Isso pode sobrescrever alterações manuais recentes nos cadastros."
+        confirmText="Sincronizar"
+        isDangerous={false}
       />
     </div>
   );
