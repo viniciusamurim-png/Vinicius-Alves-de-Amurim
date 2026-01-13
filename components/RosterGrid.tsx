@@ -1,6 +1,6 @@
 
 import React, { useMemo, useState, useEffect, useRef } from 'react';
-import { Employee, Shift, MonthlySchedule, AIRulesConfig, StaffingConfig, GridSelection, ExtendedColumnKey } from '../types';
+import { Employee, Shift, MonthlySchedule, AIRulesConfig, StaffingConfig, GridSelection, ExtendedColumnKey, ScheduleChange } from '../types';
 import { getDaysInMonth, validateSchedule, calculateRequiredDaysOff } from '../services/schedulerService';
 import { Tooltip } from './Tooltip';
 import { HOLIDAYS, COMMENTS_OPTIONS } from '../constants';
@@ -14,6 +14,7 @@ interface Props {
   staffingConfig: StaffingConfig; 
   onReorderEmployees?: (draggedId: string, targetId: string) => void;
   onUpdateEmployee?: (id: string, field: string, value: string) => void;
+  onScheduleChange?: (changes: ScheduleChange[]) => void;
   isReadOnly?: boolean;
   onUndo?: () => void;
   onRedo?: () => void;
@@ -44,7 +45,7 @@ const ITEMS_PER_PAGE = 50;
 
 export const RosterGrid: React.FC<Props> = ({ 
     employees, shifts, currentSchedule, setSchedule, rules, staffingConfig, 
-    onReorderEmployees, onUpdateEmployee, isReadOnly = false, onUndo, onRedo, currentUserId
+    onReorderEmployees, onUpdateEmployee, onScheduleChange, isReadOnly = false, onUndo, onRedo, currentUserId
 }) => {
   const [contextMenu, setContextMenu] = useState<ContextMenuState>({ visible: false, type: 'cell', x: 0, y: 0 });
   const menuRef = useRef<HTMLDivElement>(null);
@@ -147,6 +148,16 @@ export const RosterGrid: React.FC<Props> = ({
       }
       return offset;
   }
+
+  // Helper to calculate total days off for an employee
+  const calculateTotalDaysOff = (empId: string, schedule: MonthlySchedule) => {
+      let count = 0;
+      Object.values(schedule.assignments[empId] || {}).forEach(sid => {
+          const s = shifts.find(sh => sh.id === sid);
+          if (s?.category === 'dayoff') count++;
+      });
+      return count;
+  };
 
   // Sync Footer Scroll with Grid Scroll
   const handleGridScroll = () => {
@@ -254,21 +265,42 @@ export const RosterGrid: React.FC<Props> = ({
             const maxC = Math.max(selection.startCol, selection.endCol);
 
             const newAssignments = { ...currentSchedule.assignments };
-            const newAttachments = { ...currentSchedule.attachments };
-            const newComments = { ...currentSchedule.comments };
+            const changes: ScheduleChange[] = [];
             
             let changed = false;
             for (let r = minR; r <= maxR; r++) {
-                const emp = paginatedEmployees[r]; // Using paginated subset
+                const emp = paginatedEmployees[r]; 
                 if (!emp) continue;
-                const dateKeys = [];
-                for (let c = minC; c <= maxC; c++) dateKeys.push(`${currentSchedule.year}-${String(currentSchedule.month + 1).padStart(2, '0')}-${String(c).padStart(2, '0')}`);
-                
-                if (newAssignments[emp.id]) dateKeys.forEach(k => { if(newAssignments[emp.id][k]) { delete newAssignments[emp.id][k]; changed = true; }});
-                if (newAttachments[emp.id]) dateKeys.forEach(k => { if(newAttachments[emp.id][k]) { delete newAttachments[emp.id][k]; changed = true; }});
-                if (newComments[emp.id]) dateKeys.forEach(k => { if(newComments[emp.id][k]) { delete newComments[emp.id][k]; changed = true; }});
+                for (let c = minC; c <= maxC; c++) {
+                    const dateKey = `${currentSchedule.year}-${String(currentSchedule.month + 1).padStart(2, '0')}-${String(c).padStart(2, '0')}`;
+                    if(newAssignments[emp.id]?.[dateKey]) { 
+                        delete newAssignments[emp.id][dateKey]; 
+                        changed = true;
+                        
+                        // We need the NEW total count. Since we deleted a potential DayOff, we subtract 1 if it was one, but easier to recalc.
+                        // However, simpler is to let the backend recalc or send the count post-mutation. 
+                        // To be accurate, we need to know if the deleted item was a dayoff.
+                        // Hack: We pass 0 or recalculate properly.
+                        // Let's rely on calculating from the *modified* newAssignments.
+                        
+                        // Temporarily construct a mock schedule to count
+                        const tempSchedule = { ...currentSchedule, assignments: newAssignments };
+                        const totalDaysOff = calculateTotalDaysOff(emp.id, tempSchedule);
+
+                        changes.push({ 
+                            employeeId: emp.id, 
+                            day: c, 
+                            shiftCode: '', 
+                            employee: emp,
+                            totalDaysOff: totalDaysOff
+                        });
+                    }
+                }
             }
-            if (changed) setSchedule(prev => ({ ...prev, assignments: newAssignments, attachments: newAttachments, comments: newComments }));
+            if (changed) {
+                setSchedule(prev => ({ ...prev, assignments: newAssignments }));
+                if (onScheduleChange) onScheduleChange(changes);
+            }
         }
 
         // COPY
@@ -286,12 +318,15 @@ export const RosterGrid: React.FC<Props> = ({
         if ((e.ctrlKey || e.metaKey) && e.key === 'v') {
              let shiftId = internalClipboard.current;
              if (shiftId) {
+                const shift = shifts.find(s => s.id === shiftId);
                 const minR = Math.min(selection.startRow, selection.endRow);
                 const maxR = Math.max(selection.startRow, selection.endRow);
                 const minC = Math.min(selection.startCol, selection.endCol);
                 const maxC = Math.max(selection.startCol, selection.endCol);
 
                 const newAssignments = { ...currentSchedule.assignments };
+                const changes: ScheduleChange[] = [];
+
                 for (let r = minR; r <= maxR; r++) {
                     const emp = paginatedEmployees[r];
                     if (!emp) continue;
@@ -300,16 +335,28 @@ export const RosterGrid: React.FC<Props> = ({
                     for (let c = minC; c <= maxC; c++) {
                         const dateKey = `${currentSchedule.year}-${String(currentSchedule.month + 1).padStart(2, '0')}-${String(c).padStart(2, '0')}`;
                         empSchedule[dateKey] = shiftId;
+                        newAssignments[emp.id] = empSchedule; // update immediately for next iter calculation if needed
+                        
+                        const tempSchedule = { ...currentSchedule, assignments: newAssignments };
+                        const totalDaysOff = calculateTotalDaysOff(emp.id, tempSchedule);
+
+                        changes.push({ 
+                            employeeId: emp.id, 
+                            day: c, 
+                            shiftCode: shift?.code || '',
+                            employee: emp,
+                            totalDaysOff: totalDaysOff
+                        });
                     }
-                    newAssignments[emp.id] = empSchedule;
                 }
                 setSchedule(prev => ({ ...prev, assignments: newAssignments }));
+                if (onScheduleChange) onScheduleChange(changes);
              }
         }
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [selection, currentSchedule, paginatedEmployees, isReadOnly, focusedCell, setSchedule, onUndo, onRedo]);
+  }, [selection, currentSchedule, paginatedEmployees, isReadOnly, focusedCell, setSchedule, onUndo, onRedo, shifts, onScheduleChange]);
 
   const isSelected = (rowIndex: number, day: number) => {
     if (!selection) return false;
@@ -386,8 +433,71 @@ export const RosterGrid: React.FC<Props> = ({
   const handleAddComment = (comment: string) => { if (contextMenu.employeeId && contextMenu.day) { const dateKey = `${currentSchedule.year}-${String(currentSchedule.month + 1).padStart(2, '0')}-${String(contextMenu.day).padStart(2, '0')}`; setSchedule(prev => ({ ...prev, comments: { ...prev.comments, [contextMenu.employeeId!]: { ...(prev.comments?.[contextMenu.employeeId!] || {}), [dateKey]: comment } } })); } setContextMenu(prev => ({...prev, visible: false, isCommentMenu: false})); }
   const handleDownloadAttachment = () => { if(contextMenu.employeeId && contextMenu.day) { const dateKey = `${currentSchedule.year}-${String(currentSchedule.month + 1).padStart(2, '0')}-${String(contextMenu.day).padStart(2, '0')}`; const attachment = currentSchedule.attachments?.[contextMenu.employeeId]?.[dateKey]; if (attachment) { const link = document.createElement("a"); link.href = attachment.data; link.download = attachment.name; document.body.appendChild(link); link.click(); document.body.removeChild(link); } } setContextMenu(prev => ({...prev, visible: false})); }
   const handleFileSelected = (e: React.ChangeEvent<HTMLInputElement>) => { if (e.target.files && e.target.files[0] && attachmentTarget.current) { const file = e.target.files[0]; const { employeeId, day } = attachmentTarget.current; const dateKey = `${currentSchedule.year}-${String(currentSchedule.month + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`; const reader = new FileReader(); reader.onload = (event) => { const base64Data = event.target?.result as string; if (base64Data) { setSchedule(prev => ({ ...prev, attachments: { ...prev.attachments, [employeeId]: { ...(prev.attachments?.[employeeId] || {}), [dateKey]: { name: file.name, data: base64Data } } } })); } }; reader.readAsDataURL(file); } if (e.target) e.target.value = ''; };
-  const handleSelectShift = (shiftId: string) => { if (contextMenu.employeeId && contextMenu.day) { const dateKey = `${currentSchedule.year}-${String(currentSchedule.month + 1).padStart(2, '0')}-${String(contextMenu.day).padStart(2, '0')}`; setSchedule(prev => ({ ...prev, assignments: { ...prev.assignments, [contextMenu.employeeId!]: { ...(prev.assignments[contextMenu.employeeId!] || {}), [dateKey]: shiftId } } })); } setContextMenu(prev => ({ ...prev, visible: false })); };
-  const handleClearCell = () => { if (contextMenu.employeeId && contextMenu.day) { const dateKey = `${currentSchedule.year}-${String(currentSchedule.month + 1).padStart(2, '0')}-${String(contextMenu.day).padStart(2, '0')}`; const newAssignments = { ...(currentSchedule.assignments[contextMenu.employeeId!] || {}) }; delete newAssignments[dateKey]; const newAttachments = { ...(currentSchedule.attachments?.[contextMenu.employeeId!] || {}) }; if(newAttachments[dateKey]) delete newAttachments[dateKey]; const newComments = { ...(currentSchedule.comments?.[contextMenu.employeeId!] || {}) }; if(newComments[dateKey]) delete newComments[dateKey]; setSchedule(prev => ({ ...prev, assignments: { ...prev.assignments, [contextMenu.employeeId!]: newAssignments }, attachments: { ...prev.attachments, [contextMenu.employeeId!]: newAttachments }, comments: { ...prev.comments, [contextMenu.employeeId!]: newComments } })); } setContextMenu(prev => ({ ...prev, visible: false })); }
+  
+  const handleSelectShift = (shiftId: string) => { 
+      if (contextMenu.employeeId && contextMenu.day) { 
+          const dateKey = `${currentSchedule.year}-${String(currentSchedule.month + 1).padStart(2, '0')}-${String(contextMenu.day).padStart(2, '0')}`; 
+          const shift = shifts.find(s => s.id === shiftId);
+          
+          // Optimistic update
+          const newAssignments = { ...currentSchedule.assignments };
+          if (!newAssignments[contextMenu.employeeId]) newAssignments[contextMenu.employeeId] = {};
+          newAssignments[contextMenu.employeeId][dateKey] = shiftId;
+          
+          setSchedule(prev => ({ ...prev, assignments: newAssignments })); 
+          
+          if (onScheduleChange) {
+              const emp = employees.find(e => e.id === contextMenu.employeeId);
+              if (emp) {
+                  // Calc new total
+                  const tempSchedule = { ...currentSchedule, assignments: newAssignments };
+                  const totalDaysOff = calculateTotalDaysOff(emp.id, tempSchedule);
+
+                  onScheduleChange([{ 
+                      employeeId: emp.id, 
+                      day: contextMenu.day!, 
+                      shiftCode: shift?.code || '',
+                      employee: emp,
+                      totalDaysOff: totalDaysOff
+                  }]);
+              }
+          }
+      } 
+      setContextMenu(prev => ({ ...prev, visible: false })); 
+  };
+  
+  const handleClearCell = () => { 
+      if (contextMenu.employeeId && contextMenu.day) { 
+          const dateKey = `${currentSchedule.year}-${String(currentSchedule.month + 1).padStart(2, '0')}-${String(contextMenu.day).padStart(2, '0')}`; 
+          const newAssignments = { ...(currentSchedule.assignments[contextMenu.employeeId!] || {}) }; 
+          delete newAssignments[dateKey]; 
+          const newAttachments = { ...(currentSchedule.attachments?.[contextMenu.employeeId!] || {}) }; if(newAttachments[dateKey]) delete newAttachments[dateKey]; 
+          const newComments = { ...(currentSchedule.comments?.[contextMenu.employeeId!] || {}) }; if(newComments[dateKey]) delete newComments[dateKey]; 
+          
+          // Update Schedule State
+          const updatedAssignments = { ...currentSchedule.assignments, [contextMenu.employeeId!]: newAssignments };
+          
+          setSchedule(prev => ({ ...prev, assignments: updatedAssignments, attachments: { ...prev.attachments, [contextMenu.employeeId!]: newAttachments }, comments: { ...prev.comments, [contextMenu.employeeId!]: newComments } })); 
+          
+          if (onScheduleChange) {
+              const emp = employees.find(e => e.id === contextMenu.employeeId);
+              if (emp) {
+                  const tempSchedule = { ...currentSchedule, assignments: updatedAssignments };
+                  const totalDaysOff = calculateTotalDaysOff(emp.id, tempSchedule);
+
+                  onScheduleChange([{ 
+                      employeeId: emp.id, 
+                      day: contextMenu.day!, 
+                      shiftCode: '',
+                      employee: emp,
+                      totalDaysOff: totalDaysOff
+                  }]);
+              }
+          }
+      } 
+      setContextMenu(prev => ({ ...prev, visible: false })); 
+  }
+
   const handleDragStart = (e: React.DragEvent, id: string) => { if (isReadOnly) return; setDraggedEmployeeId(id); e.dataTransfer.effectAllowed = 'move'; };
   const handleDrop = (e: React.DragEvent, targetId: string) => { e.preventDefault(); if (isReadOnly) return; if (draggedEmployeeId && draggedEmployeeId !== targetId && onReorderEmployees) { onReorderEmployees(draggedEmployeeId, targetId); } setDraggedEmployeeId(null); };
 

@@ -1,7 +1,7 @@
 
 import React, { useState, useMemo, useEffect, useCallback, useRef } from 'react';
 import { INITIAL_EMPLOYEES, INITIAL_SHIFTS, MONTH_NAMES, INITIAL_UNITS, INITIAL_SECTORS, INITIAL_SHIFT_TYPES } from './constants.ts';
-import { Employee, MonthlySchedule, Shift, AIRulesConfig, StaffingConfig, User } from './types.ts';
+import { Employee, MonthlySchedule, Shift, AIRulesConfig, StaffingConfig, User, ScheduleChange } from './types.ts';
 import { EmployeeManager } from './components/EmployeeManager.tsx';
 import { ShiftManager } from './components/ShiftManager.tsx';
 import { RosterGrid } from './components/RosterGrid.tsx';
@@ -45,6 +45,15 @@ const RefreshIcon = ({ spinning }: { spinning: boolean }) => (
         <path strokeLinecap="round" strokeLinejoin="round" d="M16.023 9.348h4.992v-.001M2.985 19.644v-4.992m0 0h4.992m-4.993 0l3.181 3.183a8.25 8.25 0 0013.803-3.7M4.031 9.865a8.25 8.25 0 0113.803-3.7l3.181 3.182m0-4.991v4.99" />
     </svg>
 );
+const CloudSyncIcon = ({ syncing }: { syncing: boolean }) => (
+    <div className={`relative ${syncing ? 'text-blue-200' : 'text-green-400'}`} title={syncing ? "Sincronizando com a Nuvem..." : "Conectado"}>
+        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className={`w-5 h-5 ${syncing ? 'animate-pulse' : ''}`}>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M12 16.5V9.75m0 0l3 3m-3-3l-3 3M6.75 19.5a4.5 4.5 0 01-1.41-8.775 5.25 5.25 0 0110.233-2.33 3 3 0 013.758 3.848A3.752 3.752 0 0118 19.5H6.75z" />
+        </svg>
+        <span className="absolute -top-1 -right-1 h-2 w-2 rounded-full bg-green-500 border border-company-blue"></span>
+    </div>
+);
+
 
 const App: React.FC = () => {
   const [currentUser, setCurrentUser] = useState<User | null>(null);
@@ -81,6 +90,7 @@ const App: React.FC = () => {
   const [isSyncing, setIsSyncing] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [showSyncConfirm, setShowSyncConfirm] = useState(false); // New state for sync confirmation
+  const [isCloudSyncing, setIsCloudSyncing] = useState(false); // Background sync status
 
   const setSchedule = useCallback((value: React.SetStateAction<MonthlySchedule>) => {
       setScheduleState(prev => {
@@ -93,6 +103,83 @@ const App: React.FC = () => {
           return next;
       });
   }, []);
+
+  // REAL-TIME SYNC: Poll Changes
+  useEffect(() => {
+      if (!currentUser) return;
+      
+      const pollSchedule = async () => {
+          setIsCloudSyncing(true);
+          try {
+              const remoteAssignments = await GoogleSheetsService.fetchScheduleState(currentDate.getMonth(), currentDate.getFullYear());
+              if (remoteAssignments) {
+                  setScheduleState(prev => {
+                      // We need to merge remote assignments with local state
+                      // However, we only have codes (e.g. "F", "M") from sheet. We need to match to IDs.
+                      // This is a simplification. For robust sync, we'd need exact Shift IDs in sheet or perfect mapping.
+                      
+                      const newAssignments = { ...prev.assignments };
+                      let changed = false;
+
+                      Object.keys(remoteAssignments).forEach(empId => {
+                          const remoteDays = remoteAssignments[empId];
+                          if (!newAssignments[empId]) newAssignments[empId] = {};
+                          
+                          Object.keys(remoteDays).forEach(dayNum => {
+                                const code = remoteDays[dayNum];
+                                const dateKey = `${prev.year}-${String(prev.month + 1).padStart(2, '0')}-${String(dayNum).padStart(2, '0')}`;
+                                
+                                // Find shift ID by Code
+                                const shift = shifts.find(s => s.code === code);
+                                const currentShiftId = newAssignments[empId][dateKey];
+
+                                // Only update if different and we have a valid shift
+                                if (shift && currentShiftId !== shift.id) {
+                                    newAssignments[empId][dateKey] = shift.id;
+                                    changed = true;
+                                } else if (!shift && currentShiftId) {
+                                     // If remote is empty but local has something -> remote cleared it? 
+                                     // Or remote hasn't received it yet? 
+                                     // "Last Write Wins" in polling is tricky. 
+                                     // For now, we assume if remote sends a value, it's the source of truth.
+                                     // If remote sends empty string, it means clear.
+                                     if (code === "") {
+                                        delete newAssignments[empId][dateKey];
+                                        changed = true;
+                                     }
+                                }
+                          });
+                      });
+
+                      if (changed) {
+                          return { ...prev, assignments: newAssignments };
+                      }
+                      return prev;
+                  });
+              }
+          } catch (e) {
+              console.error("Polling error", e);
+          } finally {
+              setIsCloudSyncing(false);
+          }
+      };
+
+      // Poll every 15 seconds
+      const interval = setInterval(pollSchedule, 15000);
+      
+      // Initial poll
+      pollSchedule();
+
+      return () => clearInterval(interval);
+  }, [currentUser, currentDate, shifts]); // Depend on shifts to map codes
+
+  // Handle Changes from Grid (User Input) -> Send to Cloud
+  const handleScheduleChange = async (changes: ScheduleChange[]) => {
+      if (!currentUser) return;
+      // Fire and forget (Optimistic UI is handled by RosterGrid calling setSchedule before this)
+      await GoogleSheetsService.syncScheduleChanges(changes, currentUser);
+  };
+
 
   // UNSAVED CHANGES WARNING
   useEffect(() => {
@@ -359,6 +446,8 @@ const App: React.FC = () => {
           const newAttachments = { ...prev.attachments };
           const newComments = { ...prev.comments };
 
+          const changes: ScheduleChange[] = [];
+
           const targets = clearTargetIds.length > 0 ? filteredEmployees.filter(e => clearTargetIds.includes(e.id)) : filteredEmployees;
 
           targets.forEach(emp => {
@@ -369,11 +458,39 @@ const App: React.FC = () => {
               const daysInMonth = new Date(prev.year, prev.month + 1, 0).getDate();
               for(let d=1; d<=daysInMonth; d++) {
                   const key = `${prev.year}-${String(prev.month + 1).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
-                  if (newAssignments[emp.id]) delete newAssignments[emp.id][key];
+                  
+                  if (newAssignments[emp.id]) {
+                      // Clone inner object to prevent mutation of previous state
+                      newAssignments[emp.id] = { ...newAssignments[emp.id] };
+
+                      if (newAssignments[emp.id][key]) {
+                          delete newAssignments[emp.id][key];
+                          
+                          // Calculate days off
+                          let totalDaysOff = 0;
+                          Object.values(newAssignments[emp.id]).forEach(sid => {
+                              const s = shifts.find(sh => sh.id === sid);
+                              if (s?.category === 'dayoff') totalDaysOff++;
+                          });
+
+                          changes.push({ 
+                              employeeId: emp.id, 
+                              day: d, 
+                              shiftCode: '', 
+                              employee: emp,
+                              totalDaysOff: totalDaysOff
+                          });
+                      }
+                  }
                   if (newAttachments && newAttachments[emp.id]) delete newAttachments[emp.id][key];
                   if (newComments && newComments[emp.id]) delete newComments[emp.id][key];
               }
           });
+
+          // Sync clear
+          if (currentUser && changes.length > 0) {
+              GoogleSheetsService.syncScheduleChanges(changes, currentUser);
+          }
 
           return {
               ...prev,
@@ -400,7 +517,44 @@ const App: React.FC = () => {
 
       const result = await generateAISchedule(targetEmployees, shifts, schedule.month, schedule.year, aiRules, (current, total) => setGenerationProgress({ current, total }));
 
-      if (result) { setSchedule(prev => ({ ...prev, assignments: { ...prev.assignments, ...result } })); setHasUnsavedChanges(true); } else { alert("Erro ao gerar escala."); }
+      if (result) { 
+          setSchedule(prev => ({ ...prev, assignments: { ...prev.assignments, ...result } })); 
+          setHasUnsavedChanges(true); 
+
+          // Push AI changes to Sheet
+          if (currentUser) {
+              const changes: ScheduleChange[] = [];
+              Object.keys(result).forEach(empId => {
+                  const emp = employees.find(e => e.id === empId);
+                  if (emp) {
+                      // We calculate days off based on the NEW state.
+                      // Since setSchedule updates state asynchronously, we need to construct the expected state here.
+                      const currentAssignments = schedule.assignments[empId] || {};
+                      const newAssignments = { ...currentAssignments, ...result[empId] };
+
+                      let totalDaysOff = 0;
+                      Object.values(newAssignments).forEach(sid => {
+                          const s = shifts.find(sh => sh.id === sid);
+                          if (s?.category === 'dayoff') totalDaysOff++;
+                      });
+
+                      Object.keys(result[empId]).forEach(dateKey => {
+                          const shiftId = result[empId][dateKey];
+                          const shift = shifts.find(s => s.id === shiftId);
+                          const day = parseInt(dateKey.split('-')[2]);
+                          changes.push({
+                              employeeId: empId,
+                              employee: emp,
+                              day: day,
+                              shiftCode: shift?.code || '',
+                              totalDaysOff: totalDaysOff
+                          });
+                      });
+                  }
+              });
+              GoogleSheetsService.syncScheduleChanges(changes, currentUser);
+          }
+      } else { alert("Erro ao gerar escala."); }
       setIsGenerating(false);
   };
 
@@ -444,6 +598,7 @@ const App: React.FC = () => {
                 </div>
             )}
             <div className="flex items-center gap-3 shrink-0 ml-4">
+               {currentView === 'roster' && <CloudSyncIcon syncing={isCloudSyncing} />}
                {isAdmin && (
                    <Tooltip content="Sincronizar Cadastros">
                        <button onClick={() => setShowSyncConfirm(true)} className={`p-2 rounded-full hover:bg-blue-800 transition-colors ${isSyncing ? 'text-blue-300' : 'text-white'}`}>
@@ -503,6 +658,7 @@ const App: React.FC = () => {
                     <RosterGrid employees={filteredEmployees} shifts={shifts} currentSchedule={schedule} setSchedule={setSchedule} rules={aiRules} staffingConfig={staffingConfig} isReadOnly={!canEdit} onUndo={handleUndo} onRedo={handleRedo}
                         currentUserId={currentUser.id}
                         onUpdateEmployee={handleUpdateEmployee}
+                        onScheduleChange={handleScheduleChange}
                         onReorderEmployees={(a,b) => {
                             if (!canEdit) return;
                             const newOrder = [...employees];

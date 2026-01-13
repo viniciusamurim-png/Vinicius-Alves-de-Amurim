@@ -1,5 +1,5 @@
 
-import { Employee, User } from "../types";
+import { Employee, User, ScheduleChange } from "../types";
 import { decimalToTime } from "./schedulerService";
 
 /**
@@ -10,7 +10,7 @@ import { decimalToTime } from "./schedulerService";
  * 2. Defina "Quem pode acessar" como "Qualquer pessoa".
  * 3. Cole a URL gerada (termina com /exec) abaixo.
  */
-const APPS_SCRIPT_API_URL = "https://script.google.com/macros/s/AKfycbzmRkLKQiflhxAVXFnAqGjy0nrcbxGH46dhUo5zlquXY6_r5qa0K4djj4tAtHMCJSLJ/exec"; 
+const APPS_SCRIPT_API_URL = "https://script.google.com/macros/s/AKfycbz-SKJpQAaLErcT42oooLgmjhjYgiRilDcMdMoZYn8ZfnibUyt0nOD2b90Z_tFbIBFQ/exec"; 
 
 export const GoogleSheetsService = {
     // --- EMPLOYEES ---
@@ -222,6 +222,86 @@ export const GoogleSheetsService = {
             console.log("Solicitação de exclusão enviada.");
         } catch (e) {
             console.error("Erro ao deletar usuário:", e);
+        }
+    },
+
+    // --- SCHEDULE SYNC (BACKUP & REALTIME) ---
+
+    async syncScheduleChanges(changes: ScheduleChange[], user: User): Promise<void> {
+         if (!APPS_SCRIPT_API_URL || APPS_SCRIPT_API_URL.includes("COLE_SUA_URL")) return;
+
+         // Ensure the employee object is clean of potential circular refs or large unnecessary data if any
+         // Map to send structure expected by GAS
+         const cleanChanges = changes.map(c => ({
+             employee: {
+                 id: c.employee.id,
+                 name: c.employee.name,
+                 role: c.employee.role,
+                 cpf: c.employee.cpf,
+                 shiftPattern: c.employee.shiftPattern,
+                 workTime: c.employee.workTime,
+                 shiftType: c.employee.shiftType,
+                 positionNumber: c.employee.positionNumber,
+                 categoryCode: c.employee.categoryCode,
+                 bankHoursBalance: c.employee.bankHoursBalance,
+                 lastDayOff: c.employee.lastDayOff
+             },
+             day: c.day,
+             shiftCode: c.shiftCode,
+             totalDaysOff: c.totalDaysOff
+         }));
+
+         const payload = JSON.stringify({
+             action: 'sync_schedule',
+             changes: cleanChanges,
+             user: { name: user.name, username: user.username }
+         });
+
+         try {
+             // using fetch with no-cors doesn't allow reading response, but is faster/standard for GAS calls from web
+             // However, for sync, we might want confirmation. GAS Web App needs proper CORS headers for normal fetch.
+             // Assuming no-cors for simplicity unless error handling needed.
+             await fetch(APPS_SCRIPT_API_URL, {
+                 method: 'POST',
+                 mode: 'no-cors',
+                 headers: { 'Content-Type': 'text/plain' },
+                 body: payload
+             });
+         } catch (e) {
+             console.error("Erro ao sincronizar escala:", e);
+         }
+    },
+
+    async fetchScheduleState(month: number, year: number): Promise<Record<string, Record<string, string>> | null> {
+        if (!APPS_SCRIPT_API_URL || APPS_SCRIPT_API_URL.includes("COLE_SUA_URL")) return null;
+
+        const payload = JSON.stringify({
+            action: 'get_schedule',
+            month,
+            year
+        });
+
+        try {
+             const response = await fetch(APPS_SCRIPT_API_URL, {
+                 method: 'POST',
+                 // Need normal mode to read response
+                 headers: { 'Content-Type': 'text/plain' },
+                 body: payload
+             });
+             
+             if (!response.ok) return null;
+             const data = await response.json();
+             
+             // Data format from GAS: { assignments: { empId: { dayNumber: shiftCode } } }
+             // We need to convert to local format: assignments[empId][YYYY-MM-DD] = shiftId
+             // BUT wait, GAS returns Codes (F, M, T). We need to map back to IDs if possible, or just use Codes?
+             // The system uses Shift IDs internally.
+             // Strategy: The frontend will receive Codes and match to Shifts to find IDs.
+             return data.assignments || {};
+
+        } catch (e) {
+            console.error("Erro ao buscar estado da escala:", e);
+            return null;
         }
     }
 };

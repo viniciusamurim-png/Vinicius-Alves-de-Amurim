@@ -64,6 +64,14 @@ export interface MonthlySchedule {
   comments?: Record<string, Record<string, string>>; // employeeId -> dateKey -> Comment Type (e.g., "Hora Extra")
 }
 
+export interface ScheduleChange {
+    employeeId: string;
+    day: number;
+    shiftCode: string;
+    employee: Employee; // Full object to update static columns in Sheet
+    totalDaysOff: number; // To update the 'FOLGAS' column in Sheet
+}
+
 export interface ValidationResult {
   valid: boolean;
   messages: string[];
