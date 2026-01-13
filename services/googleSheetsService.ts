@@ -10,7 +10,12 @@ import { decimalToTime } from "./schedulerService";
  * 2. Defina "Quem pode acessar" como "Qualquer pessoa".
  * 3. Cole a URL gerada (termina com /exec) abaixo.
  */
-const APPS_SCRIPT_API_URL = "https://script.google.com/macros/s/AKfycbz-SKJpQAaLErcT42oooLgmjhjYgiRilDcMdMoZYn8ZfnibUyt0nOD2b90Z_tFbIBFQ/exec"; 
+const APPS_SCRIPT_API_URL = "https://script.google.com/macros/s/AKfycbwOxGQqIBVHk0kEJ5fmebKX3ZvztpV8gxCR_ajVknNCqJfNpszX132aLbpaIiz-paCM/exec"; 
+
+const MONTH_NAMES_PT = [
+  "Janeiro", "Fevereiro", "Março", "Abril", "Maio", "Junho",
+  "Julho", "Agosto", "Setembro", "Outubro", "Novembro", "Dezembro"
+];
 
 export const GoogleSheetsService = {
     // --- EMPLOYEES ---
@@ -230,26 +235,35 @@ export const GoogleSheetsService = {
     async syncScheduleChanges(changes: ScheduleChange[], user: User): Promise<void> {
          if (!APPS_SCRIPT_API_URL || APPS_SCRIPT_API_URL.includes("COLE_SUA_URL")) return;
 
-         // Ensure the employee object is clean of potential circular refs or large unnecessary data if any
          // Map to send structure expected by GAS
-         const cleanChanges = changes.map(c => ({
-             employee: {
-                 id: c.employee.id,
-                 name: c.employee.name,
-                 role: c.employee.role,
-                 cpf: c.employee.cpf,
-                 shiftPattern: c.employee.shiftPattern,
-                 workTime: c.employee.workTime,
-                 shiftType: c.employee.shiftType,
-                 positionNumber: c.employee.positionNumber,
-                 categoryCode: c.employee.categoryCode,
-                 bankHoursBalance: c.employee.bankHoursBalance,
-                 lastDayOff: c.employee.lastDayOff
-             },
-             day: c.day,
-             shiftCode: c.shiftCode,
-             totalDaysOff: c.totalDaysOff
-         }));
+         const cleanChanges = changes.map(c => {
+             // Construct the label: e.g. "Janeiro/2026"
+             // c.month is 0-indexed (0 = Jan)
+             const monthName = MONTH_NAMES_PT[c.month] || "";
+             const periodLabel = `${monthName}/${c.year}`;
+
+             return {
+                 employee: {
+                     id: c.employee.id,
+                     name: c.employee.name,
+                     role: c.employee.role,
+                     cpf: c.employee.cpf,
+                     shiftPattern: c.employee.shiftPattern,
+                     workTime: c.employee.workTime,
+                     shiftType: c.employee.shiftType,
+                     positionNumber: c.employee.positionNumber,
+                     categoryCode: c.employee.categoryCode,
+                     bankHoursBalance: c.employee.bankHoursBalance,
+                     lastDayOff: c.employee.lastDayOff
+                 },
+                 day: c.day,
+                 shiftCode: c.shiftCode,
+                 totalDaysOff: c.totalDaysOff,
+                 periodLabel: periodLabel, // Send the formatted string for Column 44
+                 month: c.month, // CRITICAL: Send raw month for sheet naming
+                 year: c.year    // CRITICAL: Send raw year for sheet naming
+             };
+         });
 
          const payload = JSON.stringify({
              action: 'sync_schedule',
@@ -292,11 +306,6 @@ export const GoogleSheetsService = {
              if (!response.ok) return null;
              const data = await response.json();
              
-             // Data format from GAS: { assignments: { empId: { dayNumber: shiftCode } } }
-             // We need to convert to local format: assignments[empId][YYYY-MM-DD] = shiftId
-             // BUT wait, GAS returns Codes (F, M, T). We need to map back to IDs if possible, or just use Codes?
-             // The system uses Shift IDs internally.
-             // Strategy: The frontend will receive Codes and match to Shifts to find IDs.
              return data.assignments || {};
 
         } catch (e) {

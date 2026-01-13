@@ -277,13 +277,6 @@ export const RosterGrid: React.FC<Props> = ({
                         delete newAssignments[emp.id][dateKey]; 
                         changed = true;
                         
-                        // We need the NEW total count. Since we deleted a potential DayOff, we subtract 1 if it was one, but easier to recalc.
-                        // However, simpler is to let the backend recalc or send the count post-mutation. 
-                        // To be accurate, we need to know if the deleted item was a dayoff.
-                        // Hack: We pass 0 or recalculate properly.
-                        // Let's rely on calculating from the *modified* newAssignments.
-                        
-                        // Temporarily construct a mock schedule to count
                         const tempSchedule = { ...currentSchedule, assignments: newAssignments };
                         const totalDaysOff = calculateTotalDaysOff(emp.id, tempSchedule);
 
@@ -292,7 +285,9 @@ export const RosterGrid: React.FC<Props> = ({
                             day: c, 
                             shiftCode: '', 
                             employee: emp,
-                            totalDaysOff: totalDaysOff
+                            totalDaysOff: totalDaysOff,
+                            month: currentSchedule.month,
+                            year: currentSchedule.year
                         });
                     }
                 }
@@ -345,7 +340,9 @@ export const RosterGrid: React.FC<Props> = ({
                             day: c, 
                             shiftCode: shift?.code || '',
                             employee: emp,
-                            totalDaysOff: totalDaysOff
+                            totalDaysOff: totalDaysOff,
+                            month: currentSchedule.month,
+                            year: currentSchedule.year
                         });
                     }
                 }
@@ -458,7 +455,9 @@ export const RosterGrid: React.FC<Props> = ({
                       day: contextMenu.day!, 
                       shiftCode: shift?.code || '',
                       employee: emp,
-                      totalDaysOff: totalDaysOff
+                      totalDaysOff: totalDaysOff,
+                      month: currentSchedule.month,
+                      year: currentSchedule.year
                   }]);
               }
           }
@@ -490,7 +489,9 @@ export const RosterGrid: React.FC<Props> = ({
                       day: contextMenu.day!, 
                       shiftCode: '',
                       employee: emp,
-                      totalDaysOff: totalDaysOff
+                      totalDaysOff: totalDaysOff,
+                      month: currentSchedule.month,
+                      year: currentSchedule.year
                   }]);
               }
           }

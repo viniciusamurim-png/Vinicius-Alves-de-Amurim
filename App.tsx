@@ -82,15 +82,18 @@ const App: React.FC = () => {
   
   // SCHEDULE STATE
   const [schedule, setScheduleState] = useState<MonthlySchedule>({ month: currentDate.getMonth(), year: currentDate.getFullYear(), assignments: {}, attachments: {}, comments: {} });
+  
+  // DIRTY STATE TRACKING (Exact edits)
+  const dirtyRegisters = useRef<Map<string, ScheduleChange>>(new Map());
+  
   const [historyPast, setHistoryPast] = useState<MonthlySchedule[]>([]);
   const [historyFuture, setHistoryFuture] = useState<MonthlySchedule[]>([]);
   
-  // DIRTY STATE TRACKING
   const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
   const [isSyncing, setIsSyncing] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
-  const [showSyncConfirm, setShowSyncConfirm] = useState(false); // New state for sync confirmation
-  const [isCloudSyncing, setIsCloudSyncing] = useState(false); // Background sync status
+  const [showSyncConfirm, setShowSyncConfirm] = useState(false);
+  const [isCloudSyncing, setIsCloudSyncing] = useState(false);
 
   const setSchedule = useCallback((value: React.SetStateAction<MonthlySchedule>) => {
       setScheduleState(prev => {
@@ -98,15 +101,26 @@ const App: React.FC = () => {
           if (next !== prev) {
               setHistoryPast(past => [...past, prev]);
               setHistoryFuture([]);
-              setHasUnsavedChanges(true);
           }
           return next;
       });
   }, []);
 
-  // REAL-TIME SYNC: Poll Changes
+  // Track explicit manual changes from RosterGrid
+  const handleScheduleChange = useCallback((changes: ScheduleChange[]) => {
+      changes.forEach(change => {
+          // Unique key for Employee + Date
+          const key = `${change.employeeId}-${change.year}-${change.month}-${change.day}`;
+          dirtyRegisters.current.set(key, change);
+      });
+      setHasUnsavedChanges(true);
+  }, []);
+
+  // REAL-TIME SYNC: Poll Changes (Receive only)
   useEffect(() => {
       if (!currentUser) return;
+      // STOP POLLING IF USER HAS UNSAVED CHANGES TO AVOID CONFLICTS/OVERWRITES
+      if (hasUnsavedChanges) return;
       
       const pollSchedule = async () => {
           setIsCloudSyncing(true);
@@ -114,13 +128,11 @@ const App: React.FC = () => {
               const remoteAssignments = await GoogleSheetsService.fetchScheduleState(currentDate.getMonth(), currentDate.getFullYear());
               if (remoteAssignments) {
                   setScheduleState(prev => {
-                      // We need to merge remote assignments with local state
-                      // However, we only have codes (e.g. "F", "M") from sheet. We need to match to IDs.
-                      // This is a simplification. For robust sync, we'd need exact Shift IDs in sheet or perfect mapping.
-                      
+                      if (prev.month !== currentDate.getMonth() || prev.year !== currentDate.getFullYear()) return prev;
+
                       const newAssignments = { ...prev.assignments };
                       let changed = false;
-
+                      
                       Object.keys(remoteAssignments).forEach(empId => {
                           const remoteDays = remoteAssignments[empId];
                           if (!newAssignments[empId]) newAssignments[empId] = {};
@@ -129,24 +141,15 @@ const App: React.FC = () => {
                                 const code = remoteDays[dayNum];
                                 const dateKey = `${prev.year}-${String(prev.month + 1).padStart(2, '0')}-${String(dayNum).padStart(2, '0')}`;
                                 
-                                // Find shift ID by Code
                                 const shift = shifts.find(s => s.code === code);
                                 const currentShiftId = newAssignments[empId][dateKey];
 
-                                // Only update if different and we have a valid shift
                                 if (shift && currentShiftId !== shift.id) {
                                     newAssignments[empId][dateKey] = shift.id;
                                     changed = true;
-                                } else if (!shift && currentShiftId) {
-                                     // If remote is empty but local has something -> remote cleared it? 
-                                     // Or remote hasn't received it yet? 
-                                     // "Last Write Wins" in polling is tricky. 
-                                     // For now, we assume if remote sends a value, it's the source of truth.
-                                     // If remote sends empty string, it means clear.
-                                     if (code === "") {
-                                        delete newAssignments[empId][dateKey];
-                                        changed = true;
-                                     }
+                                } else if (!shift && currentShiftId && code === "") {
+                                    delete newAssignments[empId][dateKey];
+                                    changed = true;
                                 }
                           });
                       });
@@ -164,22 +167,11 @@ const App: React.FC = () => {
           }
       };
 
-      // Poll every 15 seconds
       const interval = setInterval(pollSchedule, 15000);
-      
-      // Initial poll
-      pollSchedule();
+      pollSchedule(); 
 
       return () => clearInterval(interval);
-  }, [currentUser, currentDate, shifts]); // Depend on shifts to map codes
-
-  // Handle Changes from Grid (User Input) -> Send to Cloud
-  const handleScheduleChange = async (changes: ScheduleChange[]) => {
-      if (!currentUser) return;
-      // Fire and forget (Optimistic UI is handled by RosterGrid calling setSchedule before this)
-      await GoogleSheetsService.syncScheduleChanges(changes, currentUser);
-  };
-
+  }, [currentUser, currentDate, shifts, hasUnsavedChanges]); 
 
   // UNSAVED CHANGES WARNING
   useEffect(() => {
@@ -201,6 +193,9 @@ const App: React.FC = () => {
       setScheduleState(previous);
       setHistoryPast(newPast);
       setHasUnsavedChanges(true);
+      // NOTE: Undo doesn't currently undo the dirtyRegisters list logic, 
+      // but syncing invalid states is better than syncing wrong diffs. 
+      // Ideally Undo should also manage dirty stack.
   }, [historyPast, schedule]);
 
   const handleRedo = useCallback(() => {
@@ -225,12 +220,10 @@ const App: React.FC = () => {
   const [showGenerationScope, setShowGenerationScope] = useState(false);
   const [filterManager, setFilterManager] = useState<{ isOpen: boolean, type: 'Unit' | 'Sector' | 'Shift' | null }>({ isOpen: false, type: null });
 
-  // Clear Schedule Logic
   const [clearScopeModalOpen, setClearScopeModalOpen] = useState(false);
   const [showConfirmClear, setShowConfirmClear] = useState(false);
-  const [clearTargetIds, setClearTargetIds] = useState<string[]>([]); // If empty, means all visible
+  const [clearTargetIds, setClearTargetIds] = useState<string[]>([]); 
 
-  // Refs for click outside
   const appContainerRef = useRef<HTMLDivElement>(null);
 
   // Load Data
@@ -244,7 +237,6 @@ const App: React.FC = () => {
             if (parsed) {
                 if(parsed.employees) setEmployees(parsed.employees); 
                 if(parsed.shifts) setShifts(parsed.shifts);
-                if(parsed.schedule) setScheduleState(parsed.schedule);
                 if(parsed.aiRules) setAiRules(parsed.aiRules);
                 if(parsed.staffingConfig) setStaffingConfig(parsed.staffingConfig);
                 if(parsed.units) setUnits(parsed.units);
@@ -262,7 +254,6 @@ const App: React.FC = () => {
           const apiData = await GoogleSheetsService.fetchEmployees();
           if (apiData && apiData.length > 0) {
               setEmployees(apiData);
-              // Optionally update Units/Sectors based on new data immediately
               const builtUnits = new Set(INITIAL_UNITS);
               const builtSectors = new Set(INITIAL_SECTORS);
               apiData.forEach(e => {
@@ -287,17 +278,30 @@ const App: React.FC = () => {
       setCurrentUser(null); localStorage.removeItem('CURRENT_SESSION'); 
   };
 
+  // NEW: Save only dirty registers
   const handleSaveData = async () => {
       setIsSaving(true);
       try {
-          const dataToSave = { employees, shifts, schedule, aiRules, staffingConfig, units, sectors, shiftTypesList };
-          // Use StorageService for IndexedDB support (Large Data)
+          const changesToSync = Array.from(dirtyRegisters.current.values());
+
+          // Sync to Cloud if there are changes
+          if (changesToSync.length > 0 && currentUser) {
+              console.log(`Enviando ${changesToSync.length} alterações exatas para a nuvem...`);
+              await GoogleSheetsService.syncScheduleChanges(changesToSync, currentUser);
+          } else {
+              console.log("Nenhuma alteração registrada para enviar.");
+          }
+
+          // Save Local Meta Data
+          const dataToSave = { employees, shifts, aiRules, staffingConfig, units, sectors, shiftTypesList };
           await StorageService.save('ESCALA_FACIL_DATA', dataToSave);
           
           if (currentUser) { localStorage.setItem('CURRENT_SESSION', JSON.stringify(currentUser)); }
           
-          setIsSaved(true);
+          // Clear dirty state on success
+          dirtyRegisters.current.clear();
           setHasUnsavedChanges(false);
+          setIsSaved(true);
           setTimeout(() => setIsSaved(false), 2000);
       } catch (e) {
           console.error("Erro ao salvar", e);
@@ -312,9 +316,9 @@ const App: React.FC = () => {
       setHasUnsavedChanges(true);
   };
 
-  // Sync Lists - Clean Dirt + Uppercase Shifts
+  // Sync Lists
   useEffect(() => {
-      const builtUnits = new Set(units); // Start with existing to not lose manually added ones via FilterManager
+      const builtUnits = new Set(units);
       const builtSectors = new Set(sectors);
       const builtTypes = new Set(shiftTypesList);
 
@@ -334,9 +338,8 @@ const App: React.FC = () => {
       
   }, [employees]);
 
-  // --- DERIVED LISTS FOR FILTERS (Restricted by User Permissions AND Cascading) ---
+  // Derived Lists
   const availableEmployees = useMemo(() => {
-      // First, filter all employees to only those the user is allowed to see based on UNITS
       if (currentUser?.role !== 'admin' && currentUser?.allowedUnits && currentUser.allowedUnits.length > 0) {
           return employees.filter(e => currentUser.allowedUnits!.includes(e.unit));
       }
@@ -349,18 +352,11 @@ const App: React.FC = () => {
   }, [availableEmployees]);
 
   const activeSectors = useMemo(() => {
-      // Start with all available employees
       let relevantEmployees = availableEmployees;
-      
-      // CASCADE: If Units are selected, filter potential sectors to only those units
       if (selectedUnits.length > 0) {
           relevantEmployees = relevantEmployees.filter(e => selectedUnits.includes(e.unit));
       }
-
-      // Get sectors present in the filtered list
       let rawSectors = Array.from(new Set(relevantEmployees.map(e => e.sector).filter(Boolean))).sort();
-      
-      // Further restrict if the user has specific allowed sectors defined (Permission Check)
       if (currentUser?.role !== 'admin' && currentUser?.allowedSectors && currentUser.allowedSectors.length > 0) {
           rawSectors = rawSectors.filter(s => currentUser.allowedSectors!.includes(s));
       }
@@ -368,49 +364,33 @@ const App: React.FC = () => {
   }, [availableEmployees, currentUser, selectedUnits]);
 
   const activeShiftTypes = useMemo(() => {
-      // Start with all available employees
       let relevantEmployees = availableEmployees;
-
-      // CASCADE: Filter by Selected Units
       if (selectedUnits.length > 0) {
           relevantEmployees = relevantEmployees.filter(e => selectedUnits.includes(e.unit));
       }
-
-      // CASCADE: Filter by Selected Sectors
       if (selectedSectors.length > 0) {
           relevantEmployees = relevantEmployees.filter(e => selectedSectors.includes(e.sector));
       }
-
       return Array.from(new Set(relevantEmployees.map(e => e.shiftType).filter(Boolean))).sort();
   }, [availableEmployees, selectedUnits, selectedSectors]);
 
-
-  // --- MAIN TABLE FILTERING ---
+  // Main Filtering
   const filteredEmployees = useMemo(() => {
       return availableEmployees.filter(emp => {
-        // Sector Permission Check (Granular)
         if (currentUser?.role !== 'admin' && currentUser?.allowedSectors && currentUser.allowedSectors.length > 0) {
             if (!currentUser.allowedSectors.includes(emp.sector)) return false;
         }
-
-        // Search Bar Check
         if (globalSearchTerm) {
             const term = globalSearchTerm.toLowerCase();
             const match = emp.name.toLowerCase().includes(term) || emp.id.includes(term) || emp.role.toLowerCase().includes(term);
             if (!match) return false;
         }
-
-        // Termination Check
         if (emp.terminationDate) {
             const termDate = new Date(emp.terminationDate);
             const scheduleDateStart = new Date(schedule.year, schedule.month, 1);
             const termDateEnd = new Date(termDate.getFullYear(), termDate.getMonth() + 1, 0); 
-            
-            if (scheduleDateStart > termDateEnd) {
-                return false; 
-            }
+            if (scheduleDateStart > termDateEnd) return false; 
         }
-
         const matchUnit = selectedUnits.length === 0 || selectedUnits.includes(emp.unit);
         const matchSector = selectedSectors.length === 0 || selectedSectors.includes(emp.sector);
         const matchShift = selectedShiftTypes.length === 0 || selectedShiftTypes.includes(emp.shiftType);
@@ -418,26 +398,41 @@ const App: React.FC = () => {
       });
   }, [availableEmployees, selectedUnits, selectedSectors, selectedShiftTypes, currentUser, globalSearchTerm, schedule.year, schedule.month]);
 
+  // --- PERMISSION & DATE LOCK LOGIC ---
+  const isPastMonth = useMemo(() => {
+      const today = new Date();
+      const viewDate = new Date(schedule.year, schedule.month, 1);
+      const currentMonthStart = new Date(today.getFullYear(), today.getMonth(), 1);
+      return viewDate < currentMonthStart;
+  }, [schedule.month, schedule.year]);
+
+  const canEdit = useMemo(() => {
+      if (!currentUser) return false;
+      if (currentUser.role === 'admin') return true; 
+      if (currentUser.role === 'viewer') return false; 
+      if (isPastMonth) return false;
+      return true; 
+  }, [currentUser, isPastMonth]);
+
   const handleMonthChange = (offset: number) => {
     if (hasUnsavedChanges) {
-        if (!confirm("Existem alterações não salvas. Mudar de mês descartará o histórico de desfazer. Continuar?")) return;
+        if (!confirm("Existem alterações não salvas. Mudar de mês descartará o histórico de desfazer e recarregará os dados da nuvem. Continuar?")) return;
         setHasUnsavedChanges(false);
+        dirtyRegisters.current.clear();
     }
     const newDate = new Date(currentDate.getFullYear(), currentDate.getMonth() + offset, 1);
     setCurrentDate(newDate);
-    setSchedule(prev => ({ ...prev, month: newDate.getMonth(), year: newDate.getFullYear() }));
+    const newSchedule = { month: newDate.getMonth(), year: newDate.getFullYear(), assignments: {}, attachments: {}, comments: {} };
+    setScheduleState(newSchedule);
     setHistoryPast([]); setHistoryFuture([]);
   };
 
-  const handleClearClick = () => {
-      // First open scope selection
-      setClearScopeModalOpen(true);
-  }
+  const handleClearClick = () => setClearScopeModalOpen(true);
 
   const handleScopeConfirm = (ids: string[]) => {
       setClearTargetIds(ids);
       setClearScopeModalOpen(false);
-      setShowConfirmClear(true); // Then open confirmation
+      setShowConfirmClear(true); 
   }
 
   const executeClearSchedule = () => {
@@ -445,61 +440,37 @@ const App: React.FC = () => {
           const newAssignments = { ...prev.assignments };
           const newAttachments = { ...prev.attachments };
           const newComments = { ...prev.comments };
-
           const changes: ScheduleChange[] = [];
 
           const targets = clearTargetIds.length > 0 ? filteredEmployees.filter(e => clearTargetIds.includes(e.id)) : filteredEmployees;
 
           targets.forEach(emp => {
-              // We need to clear only the current month's data keys
-              // But since structure is flat per employee per key, we must iterate keys or just clear employee obj if we assume strict month management?
-              // The state structure: assignments[empId][dateKey]
-              // Best way: Iterate days of current month and delete keys.
               const daysInMonth = new Date(prev.year, prev.month + 1, 0).getDate();
               for(let d=1; d<=daysInMonth; d++) {
                   const key = `${prev.year}-${String(prev.month + 1).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
-                  
-                  if (newAssignments[emp.id]) {
-                      // Clone inner object to prevent mutation of previous state
+                  if (newAssignments[emp.id]?.[key]) {
                       newAssignments[emp.id] = { ...newAssignments[emp.id] };
-
-                      if (newAssignments[emp.id][key]) {
-                          delete newAssignments[emp.id][key];
-                          
-                          // Calculate days off
-                          let totalDaysOff = 0;
-                          Object.values(newAssignments[emp.id]).forEach(sid => {
-                              const s = shifts.find(sh => sh.id === sid);
-                              if (s?.category === 'dayoff') totalDaysOff++;
-                          });
-
-                          changes.push({ 
-                              employeeId: emp.id, 
-                              day: d, 
-                              shiftCode: '', 
-                              employee: emp,
-                              totalDaysOff: totalDaysOff
-                          });
-                      }
+                      delete newAssignments[emp.id][key];
+                      
+                      // MARK AS DIRTY (Deletion)
+                      changes.push({
+                        employeeId: emp.id,
+                        employee: emp,
+                        day: d,
+                        shiftCode: '',
+                        totalDaysOff: 0, 
+                        month: prev.month,
+                        year: prev.year
+                      });
                   }
                   if (newAttachments && newAttachments[emp.id]) delete newAttachments[emp.id][key];
                   if (newComments && newComments[emp.id]) delete newComments[emp.id][key];
               }
           });
-
-          // Sync clear
-          if (currentUser && changes.length > 0) {
-              GoogleSheetsService.syncScheduleChanges(changes, currentUser);
-          }
-
-          return {
-              ...prev,
-              assignments: newAssignments,
-              attachments: newAttachments,
-              comments: newComments
-          };
+          
+          handleScheduleChange(changes);
+          return { ...prev, assignments: newAssignments, attachments: newAttachments, comments: newComments };
       });
-      setHasUnsavedChanges(true);
   }
 
   const handleAutoGenerateClick = () => {
@@ -518,48 +489,35 @@ const App: React.FC = () => {
       const result = await generateAISchedule(targetEmployees, shifts, schedule.month, schedule.year, aiRules, (current, total) => setGenerationProgress({ current, total }));
 
       if (result) { 
-          setSchedule(prev => ({ ...prev, assignments: { ...prev.assignments, ...result } })); 
-          setHasUnsavedChanges(true); 
-
-          // Push AI changes to Sheet
-          if (currentUser) {
-              const changes: ScheduleChange[] = [];
-              Object.keys(result).forEach(empId => {
-                  const emp = employees.find(e => e.id === empId);
-                  if (emp) {
-                      // We calculate days off based on the NEW state.
-                      // Since setSchedule updates state asynchronously, we need to construct the expected state here.
-                      const currentAssignments = schedule.assignments[empId] || {};
-                      const newAssignments = { ...currentAssignments, ...result[empId] };
-
-                      let totalDaysOff = 0;
-                      Object.values(newAssignments).forEach(sid => {
-                          const s = shifts.find(sh => sh.id === sid);
-                          if (s?.category === 'dayoff') totalDaysOff++;
-                      });
-
-                      Object.keys(result[empId]).forEach(dateKey => {
-                          const shiftId = result[empId][dateKey];
-                          const shift = shifts.find(s => s.id === shiftId);
-                          const day = parseInt(dateKey.split('-')[2]);
-                          changes.push({
-                              employeeId: empId,
-                              employee: emp,
-                              day: day,
-                              shiftCode: shift?.code || '',
-                              totalDaysOff: totalDaysOff
-                          });
-                      });
-                  }
+          // Parse results to mark as dirty
+          const newChanges: ScheduleChange[] = [];
+          Object.keys(result).forEach(empId => {
+              const daysMap = result[empId];
+              Object.keys(daysMap).forEach(dateKey => {
+                  const parts = dateKey.split('-');
+                  const day = parseInt(parts[2]);
+                  const shiftId = daysMap[dateKey];
+                  const shift = shifts.find(s => s.id === shiftId);
+                  
+                  newChanges.push({
+                     employeeId: empId,
+                     employee: employees.find(e => e.id === empId)!,
+                     day: day,
+                     shiftCode: shift?.code || '',
+                     totalDaysOff: 0,
+                     month: schedule.month,
+                     year: schedule.year
+                  });
               });
-              GoogleSheetsService.syncScheduleChanges(changes, currentUser);
-          }
+          });
+
+          setSchedule(prev => ({ ...prev, assignments: { ...prev.assignments, ...result } })); 
+          handleScheduleChange(newChanges);
       } else { alert("Erro ao gerar escala."); }
       setIsGenerating(false);
   };
 
   const handlePrint = () => window.print();
-  const canEdit = currentUser?.role === 'admin' || currentUser?.role === 'manager';
   const isAdmin = currentUser?.role === 'admin';
 
   if (!currentUser) return <LoginScreen onLogin={handleLogin} />;
@@ -626,6 +584,11 @@ const App: React.FC = () => {
                     {canEdit && (<Tooltip content="Limpar Escala"><button onClick={handleClearClick} className="p-2 text-red-300 hover:bg-red-500/20 hover:text-red-200 rounded-full transition-all"><TrashIcon /></button></Tooltip>)}
                     <div className="w-px h-8 bg-blue-700 mx-2 hidden sm:block"></div>
                     {canEdit && (<>{isAdmin && (<Tooltip content="Legendas & Turnos"><button onClick={() => setShowShifts(true)} className="p-2 text-white hover:bg-white/10 rounded-full"><TagIcon /></button></Tooltip>)}<Tooltip content="Regras da IA"><button onClick={() => setShowRules(true)} className="p-2 text-white hover:bg-white/10 rounded-full"><MegaphoneIcon /></button></Tooltip><Tooltip content="Dimensionamento"><button onClick={() => setShowStaffing(true)} className="p-2 text-white hover:bg-white/10 rounded-full"><ChartBarIcon /></button></Tooltip><button onClick={handleAutoGenerateClick} disabled={isGenerating} className="ml-2 px-4 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold rounded uppercase shadow border border-emerald-400 disabled:opacity-50 min-w-max">{isGenerating ? 'Parar' : 'Gerar (IA)'}</button></>)}
+                    {!canEdit && (
+                        <div className="ml-2 px-4 py-1.5 bg-gray-500/50 text-white text-xs font-bold rounded border border-gray-400 cursor-not-allowed flex items-center gap-1" title="Edição bloqueada para meses anteriores">
+                            <span>🔒 Somente Leitura</span>
+                        </div>
+                    )}
                 </div>
             </div>
         )}

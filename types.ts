@@ -70,6 +70,8 @@ export interface ScheduleChange {
     shiftCode: string;
     employee: Employee; // Full object to update static columns in Sheet
     totalDaysOff: number; // To update the 'FOLGAS' column in Sheet
+    month: number; // For Column 44
+    year: number; // For Column 44
 }
 
 export interface ValidationResult {
