@@ -43,6 +43,77 @@ interface DailyStat {
 
 const ITEMS_PER_PAGE = 50; 
 
+// --- HELPERS PARA DATA UF ---
+const toDisplayDate = (val: string) => {
+    if (!val) return '';
+    
+    // Se for formato ISO YYYY-MM-DD, converte para DD/MM/AA
+    if (/^\d{4}-\d{2}-\d{2}$/.test(val)) {
+        const [y, m, d] = val.split('-');
+        return `${d}/${m}/${y.slice(2)}`;
+    }
+
+    // Se for formato longo ou "sujo" (ex: Tue Jan 13 2026...), tenta parsear
+    // Limpeza para remover conteúdo entre parênteses que pode quebrar o Date.parse
+    const cleanVal = val.replace(/\(.*\)/, '').trim();
+    const d = new Date(cleanVal);
+    
+    if (!isNaN(d.getTime())) {
+         const day = String(d.getDate()).padStart(2, '0');
+         const month = String(d.getMonth() + 1).padStart(2, '0');
+         const year = String(d.getFullYear()).slice(2);
+         return `${day}/${month}/${year}`;
+    }
+
+    // Fallback via Regex se o Date.parse falhar para strings verbosas (ex: Tue Jan 13 2026)
+    const match = val.match(/(\w{3}) (\w{3}) (\d{1,2}) (\d{4})/);
+    if (match) {
+        const months: Record<string, string> = { Jan:'01', Feb:'02', Mar:'03', Apr:'04', May:'05', Jun:'06', Jul:'07', Aug:'08', Sep:'09', Oct:'10', Nov:'11', Dec:'12' };
+        const m = months[match[2]] || '01';
+        const day = match[3].padStart(2, '0');
+        const year = match[4].slice(2);
+        return `${day}/${m}/${year}`;
+    }
+
+    // Último recurso: Se a string for muito longa e não conseguimos parsear, 
+    // retorna 'Data Inv.' ou string vazia para não quebrar o layout
+    if (val.length > 15) return 'Data Inv.';
+
+    return val;
+};
+
+const normalizeDateInput = (val: string) => {
+    // Remove tudo que não for dígito ou barra
+    const clean = val.replace(/[^0-9/]/g, '');
+    
+    // DD/MM/YYYY
+    if (/^\d{1,2}\/\d{1,2}\/\d{4}$/.test(clean)) {
+        const [d, m, y] = clean.split('/');
+        return `${y}-${m.padStart(2,'0')}-${d.padStart(2,'0')}`;
+    }
+    // DD/MM/YY
+    if (/^\d{1,2}\/\d{1,2}\/\d{2}$/.test(clean)) {
+        const [d, m, y] = clean.split('/');
+        return `20${y}-${m.padStart(2,'0')}-${d.padStart(2,'0')}`;
+    }
+    // 250925 (DDMMAA)
+    if (/^\d{6}$/.test(clean)) {
+        const d = clean.slice(0,2);
+        const m = clean.slice(2,4);
+        const y = clean.slice(4,6);
+        return `20${y}-${m}-${d}`;
+    }
+    // 25092025 (DDMMAAAA)
+    if (/^\d{8}$/.test(clean)) {
+        const d = clean.slice(0,2);
+        const m = clean.slice(2,4);
+        const y = clean.slice(4,8);
+        return `${y}-${m}-${d}`;
+    }
+    
+    return val;
+}
+
 export const RosterGrid: React.FC<Props> = ({ 
     employees, shifts, currentSchedule, setSchedule, rules, staffingConfig, 
     onReorderEmployees, onUpdateEmployee, onScheduleChange, isReadOnly = false, onUndo, onRedo, currentUserId
@@ -576,8 +647,13 @@ export const RosterGrid: React.FC<Props> = ({
                     <div draggable={!isReadOnly} onDragStart={(e) => handleDragStart(e, employee.id)} onDrop={(e) => handleDrop(e, employee.id)} onDragOver={(e) => e.preventDefault()} className="flex-shrink-0 flex border-r border-slate-300 bg-white z-10 group-hover:bg-blue-50 cursor-move">
                         {visibleColumns.map(key => {
                             let val = key === 'scale' ? employee.shiftPattern : key === 'time' ? employee.workTime : key === 'position' ? employee.positionNumber : key === 'council' ? employee.categoryCode : key === 'bh' ? employee.bankHoursBalance : key === 'uf' ? employee.lastDayOff : (employee as any)[key];
+                            
+                            // Formatação especial para UF
                             let displayVal = val;
-                            if (key === 'uf' && val) { const [year, month, day] = val.split('-'); if (year && month && day) displayVal = `${day}/${month}`; }
+                            if (key === 'uf') {
+                                displayVal = toDisplayDate(val);
+                            }
+
                             const colorClass = key === 'bh' ? (val && val.startsWith('-') ? 'text-red-600' : 'text-green-600 font-bold') : 'text-slate-500';
                             const isFrozen = frozenColumns.includes(key); const left = getStickyLeft(key);
                             const canEditCell = !isReadOnly && (key === 'shiftType' || key === 'uf');
@@ -586,7 +662,28 @@ export const RosterGrid: React.FC<Props> = ({
                                 <div key={key} style={{ width: colWidths[key], position: isFrozen ? 'sticky' : 'relative', left: isFrozen ? left : 'auto', zIndex: isFrozen ? 50 : 'auto' }} className={`flex items-center px-2 border-r border-slate-100 overflow-hidden bg-white group-hover:bg-blue-50 ${isFrozen ? 'shadow-[2px_0_5px_rgba(0,0,0,0.05)]' : ''}`}>
                                     {canEditCell ? (
                                         key === 'uf' ? (
-                                            <div className="relative w-full h-full flex items-center justify-between px-1 group/uf"><span className={`bg-transparent border-none text-[10px] uppercase font-medium min-w-0 flex-1 ${val ? 'text-slate-600' : 'text-slate-300'}`}>{displayVal || 'DD/MM'}</span><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="w-3 h-3 text-slate-400 group-hover/uf:text-blue-500 transition-colors"><path fillRule="evenodd" d="M5.75 2a.75.75 0 01.75.75V4h7V2.75a.75.75 0 011.5 0V4h.25A2.75 2.75 0 0118 6.75v8.5A2.75 2.75 0 0115.25 18H4.75A2.75 2.75 0 012 15.25v-8.5A2.75 2.75 0 014.75 4H5V2.75A.75.75 0 015.75 2zm-1 5.5c-.69 0-1.25.56-1.25 1.25v6.5c0 .69.56 1.25 1.25 1.25h10.5c.69 0 1.25-.56 1.25-1.25v-6.5c0-.69-.56-1.25-1.25-1.25H4.75z" clipRule="evenodd" /></svg><input type="date" className="absolute inset-0 w-full h-full opacity-0 cursor-pointer" value={val || ''} onChange={(e) => { if (onUpdateEmployee) onUpdateEmployee(employee.id, 'lastDayOff', e.target.value); }} /></div>
+                                            <div className="relative w-full h-full flex items-center justify-between px-1 group/uf">
+                                                <input 
+                                                    type="text" 
+                                                    className="w-full h-full bg-transparent border-none text-[10px] uppercase font-medium focus:ring-1 focus:ring-blue-500 rounded px-1 min-w-0"
+                                                    placeholder="DD/MM/AA"
+                                                    value={displayVal || ''} 
+                                                    onChange={(e) => { if (onUpdateEmployee) onUpdateEmployee(employee.id, 'lastDayOff', e.target.value); }}
+                                                    onBlur={(e) => { if (onUpdateEmployee) onUpdateEmployee(employee.id, 'lastDayOff', normalizeDateInput(e.target.value)); }}
+                                                    onKeyDown={(e) => { e.stopPropagation(); if (e.key === 'Enter') e.currentTarget.blur(); }}
+                                                />
+                                                <div className="relative w-5 h-full flex items-center justify-center cursor-pointer text-slate-400 hover:text-blue-500 pr-1">
+                                                     <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="w-3 h-3 pointer-events-none">
+                                                        <path fillRule="evenodd" d="M5.75 2a.75.75 0 01.75.75V4h7V2.75a.75.75 0 011.5 0V4h.25A2.75 2.75 0 0118 6.75v8.5A2.75 2.75 0 0115.25 18H4.75A2.75 2.75 0 012 15.25v-8.5A2.75 2.75 0 014.75 4H5V2.75A.75.75 0 015.75 2zm-1 5.5c-.69 0-1.25.56-1.25 1.25v6.5c0 .69.56 1.25 1.25 1.25h10.5c.69 0 1.25-.56 1.25-1.25v-6.5c0-.69-.56-1.25-1.25-1.25H4.75z" clipRule="evenodd" />
+                                                     </svg>
+                                                     <input 
+                                                        type="date" 
+                                                        className="absolute inset-0 w-full h-full opacity-0 cursor-pointer" 
+                                                        value={/^\d{4}-\d{2}-\d{2}$/.test(val) ? val : ''} 
+                                                        onChange={(e) => { if (onUpdateEmployee) onUpdateEmployee(employee.id, 'lastDayOff', e.target.value); }} 
+                                                     />
+                                                </div>
+                                            </div>
                                         ) : (
                                             <input type="text" className="w-full bg-transparent border-none text-[10px] uppercase font-medium focus:ring-1 focus:ring-blue-500 rounded px-1 min-w-0 h-full" value={val || ''} onChange={(e) => { if (onUpdateEmployee) onUpdateEmployee(employee.id, 'shiftType', e.target.value); }} onKeyDown={(e) => { e.stopPropagation(); if (e.key === 'Enter') e.currentTarget.blur(); }} />
                                         )
