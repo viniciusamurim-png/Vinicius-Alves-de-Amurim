@@ -133,7 +133,128 @@ export const validateSchedule = (
   return { valid: messages.length === 0, messages, invalidDays };
 };
 
-const BATCH_SIZE = 15; // Process 15 employees at a time to avoid token limits
+// OTIMIZAÇÃO: Aumento do Batch Size para reduzir chamadas API
+const BATCH_SIZE = 30; 
+
+// Helper para processar um único lote
+const processBatch = async (
+    ai: GoogleGenAI,
+    batch: Employee[],
+    shifts: Shift[],
+    month: number,
+    year: number,
+    rules: AIRulesConfig,
+    folgaId: string,
+    dsrId: string,
+    startDate: string,
+    endDate: string
+): Promise<Record<string, Record<string, string>>> => {
+    
+    const prompt = `
+      Atue como especialista em escalas de trabalho CLT.
+      Gere os dias de FOLGA ("${folgaId}") e DESCANSO ("${dsrId}") para o período ${startDate} a ${endDate}.
+      
+      IMPORTANTE: Retorne APENAS os dias que NÃO são trabalho (F ou DSR). Os dias de trabalho devem ficar vazios (null).
+
+      REGRAS GERAIS:
+      1. Considere 'lastDayOff' para determinar se o dia 1 do mês é trabalho ou folga (especialmente para 12x36).
+      2. Não deixe todos os colaboradores do mesmo setor folgarem no mesmo dia (para escalas diárias).
+      
+      REGRAS POR TIPO DE ESCALA:
+      
+      [ESCALA 12x36]
+      - ESSENCIAL: Você DEVE gerar os dias de descanso ("${dsrId}") alternados com os dias de trabalho.
+      - O padrão é: Dia sim (Trabalho/Null), Dia não (Descanso/${dsrId}).
+      - Verifique 'lastDayOff' para saber a sequência correta. Se lastDayOff foi o último dia do mês anterior, dia 1 é Trabalho. Se foi o penúltimo, dia 1 é DSR.
+      - ALÉM do padrão 1x1, aplique a "Folga Extra Quinzenal": O colaborador precisa de 1 folga extra ("${folgaId}") a cada quinzena.
+      - A folga extra ("${folgaId}") SUBSTITUI um dia que seria de trabalho na sequência.
+      - Resultado visual esperado no JSON para a sequência: ... DSR | ${folgaId} | DSR ... (Onde ${folgaId} tomou o lugar de um dia de trabalho).
+      - NUNCA retorne null (trabalho) para os dias que devem ser DSR. Eles precisam ser preenchidos explicitamente com "${dsrId}".
+      
+      [ESCALA 6x1]
+      - Trabalha 6, Folga 1.
+      - Quantidade de Folgas no Mês = Número de Domingos + Número de Feriados no mês.
+      - Use "${folgaId}" para todas as folgas.
+      - Priorize domingos para mulheres.
+      - Respeite o limite de ${rules.maxConsecutiveDays} dias de trabalho seguidos.
+
+      [ESCALA 5x2]
+      - Trabalha 5, Folga 2.
+      - Quantidade de Folgas no Mês = Sábados + Domingos + Feriados.
+      - Use "${folgaId}" para todas as folgas.
+      - Normalmente folgam Sáb e Dom, mas se necessário, distribua.
+
+      COLABORADORES:
+      ${JSON.stringify(batch.map(e => ({ 
+          id: e.id, 
+          pattern: e.shiftPattern,
+          gender: e.gender,
+          lastDayOff: e.lastDayOff,
+          initialConsecutiveDays: getInitialConsecutiveDays(e.lastDayOff, month, year)
+      })))}
+
+      Retorne JSON estrito com array de 'schedules' contendo 'employeeId' e 'days' (array de {date, shiftId}).
+    `;
+
+    try {
+        const response = await ai.models.generateContent({
+          model: "gemini-2.5-flash",
+          contents: prompt,
+          config: {
+            responseMimeType: "application/json",
+            responseSchema: {
+              type: Type.OBJECT,
+              properties: {
+                 schedules: {
+                    type: Type.ARRAY,
+                    items: {
+                       type: Type.OBJECT,
+                       properties: {
+                          employeeId: { type: Type.STRING },
+                          days: {
+                             type: Type.ARRAY,
+                             items: {
+                                type: Type.OBJECT,
+                                properties: {
+                                   date: { type: Type.STRING, description: "YYYY-MM-DD" },
+                                   shiftId: { type: Type.STRING }
+                                },
+                                required: ["date", "shiftId"]
+                             }
+                          }
+                       },
+                       required: ["employeeId", "days"]
+                    }
+                 }
+              },
+              required: ["schedules"]
+            }
+          }
+        });
+
+        const json = JSON.parse(response.text);
+        const batchResults: Record<string, Record<string, string>> = {};
+        
+        if (json.schedules && Array.isArray(json.schedules)) {
+            json.schedules.forEach((sch: any) => {
+                const empMap: Record<string, string> = {};
+                if (sch.days && Array.isArray(sch.days)) {
+                    sch.days.forEach((d: any) => {
+                        if (d.date && d.shiftId) {
+                            empMap[d.date] = d.shiftId;
+                        }
+                    });
+                }
+                batchResults[sch.employeeId] = empMap;
+            });
+        }
+        return batchResults;
+
+    } catch (batchError) {
+        console.error(`Erro no processamento do lote:`, batchError);
+        return {};
+    }
+};
 
 export const generateAISchedule = async (
   employees: Employee[],
@@ -157,118 +278,37 @@ export const generateAISchedule = async (
     const dsrId = dsrShift ? dsrShift.id : 'dsr';
 
     let combinedAssignments: Record<string, Record<string, string>> = {};
+    
+    // Create Batches
+    const batches: Employee[][] = [];
+    for (let i = 0; i < employees.length; i += BATCH_SIZE) {
+        batches.push(employees.slice(i, i + BATCH_SIZE));
+    }
+
+    let completedBatches = 0;
     const totalEmployees = employees.length;
 
-    // Process in batches
-    for (let i = 0; i < totalEmployees; i += BATCH_SIZE) {
-        const batch = employees.slice(i, i + BATCH_SIZE);
+    // Process all batches in PARALLEL (concurrency handled by Promise.all)
+    // For very large lists (>500), we might need to chunk the promises, but for < 200, Promise.all is fine with Gemini 2.5 Flash limits.
+    const promises = batches.map(async (batch) => {
+        const result = await processBatch(ai, batch, shifts, month, year, rules, folgaId, dsrId, startDate, endDate);
         
-        // Notify progress
+        // Update progress atomically
+        completedBatches++;
+        // Rough estimate of progress: (completed batches / total batches) * total employees
         if (onProgress) {
-            onProgress(i, totalEmployees);
+            onProgress(Math.min(completedBatches * BATCH_SIZE, totalEmployees), totalEmployees);
         }
+        
+        return result;
+    });
 
-        const prompt = `
-          Atue como especialista em escalas de trabalho CLT.
-          Gere os dias de FOLGA ("${folgaId}") e DESCANSO ("${dsrId}") para o período ${startDate} a ${endDate}.
-          
-          IMPORTANTE: Retorne APENAS os dias que NÃO são trabalho (F ou DSR). Os dias de trabalho devem ficar vazios (null).
+    const resultsArray = await Promise.all(promises);
 
-          REGRAS GERAIS:
-          1. Considere 'lastDayOff' para determinar se o dia 1 do mês é trabalho ou folga (especialmente para 12x36).
-          2. Não deixe todos os colaboradores do mesmo setor folgarem no mesmo dia (para escalas diárias).
-          
-          REGRAS POR TIPO DE ESCALA:
-          
-          [ESCALA 12x36]
-          - ESSENCIAL: Você DEVE gerar os dias de descanso ("${dsrId}") alternados com os dias de trabalho.
-          - O padrão é: Dia sim (Trabalho/Null), Dia não (Descanso/${dsrId}).
-          - Verifique 'lastDayOff' para saber a sequência correta. Se lastDayOff foi o último dia do mês anterior, dia 1 é Trabalho. Se foi o penúltimo, dia 1 é DSR.
-          - ALÉM do padrão 1x1, aplique a "Folga Extra Quinzenal": O colaborador precisa de 1 folga extra ("${folgaId}") a cada quinzena.
-          - A folga extra ("${folgaId}") SUBSTITUI um dia que seria de trabalho na sequência.
-          - Resultado visual esperado no JSON para a sequência: ... DSR | ${folgaId} | DSR ... (Onde ${folgaId} tomou o lugar de um dia de trabalho).
-          - NUNCA retorne null (trabalho) para os dias que devem ser DSR. Eles precisam ser preenchidos explicitamente com "${dsrId}".
-          
-          [ESCALA 6x1]
-          - Trabalha 6, Folga 1.
-          - Quantidade de Folgas no Mês = Número de Domingos + Número de Feriados no mês.
-          - Use "${folgaId}" para todas as folgas.
-          - Priorize domingos para mulheres.
-          - Respeite o limite de ${rules.maxConsecutiveDays} dias de trabalho seguidos.
-
-          [ESCALA 5x2]
-          - Trabalha 5, Folga 2.
-          - Quantidade de Folgas no Mês = Sábados + Domingos + Feriados.
-          - Use "${folgaId}" para todas as folgas.
-          - Normalmente folgam Sáb e Dom, mas se necessário, distribua.
-
-          COLABORADORES (Lote ${Math.floor(i / BATCH_SIZE) + 1}):
-          ${JSON.stringify(batch.map(e => ({ 
-              id: e.id, 
-              pattern: e.shiftPattern,
-              gender: e.gender,
-              lastDayOff: e.lastDayOff,
-              initialConsecutiveDays: getInitialConsecutiveDays(e.lastDayOff, month, year)
-          })))}
-
-          Retorne JSON estrito com array de 'schedules' contendo 'employeeId' e 'days' (array de {date, shiftId}).
-        `;
-
-        try {
-            const response = await ai.models.generateContent({
-              model: "gemini-2.5-flash",
-              contents: prompt,
-              config: {
-                responseMimeType: "application/json",
-                responseSchema: {
-                  type: Type.OBJECT,
-                  properties: {
-                     schedules: {
-                        type: Type.ARRAY,
-                        items: {
-                           type: Type.OBJECT,
-                           properties: {
-                              employeeId: { type: Type.STRING },
-                              days: {
-                                 type: Type.ARRAY,
-                                 items: {
-                                    type: Type.OBJECT,
-                                    properties: {
-                                       date: { type: Type.STRING, description: "YYYY-MM-DD" },
-                                       shiftId: { type: Type.STRING }
-                                    },
-                                    required: ["date", "shiftId"]
-                                 }
-                              }
-                           },
-                           required: ["employeeId", "days"]
-                        }
-                     }
-                  },
-                  required: ["schedules"]
-                }
-              }
-            });
-
-            const json = JSON.parse(response.text);
-            
-            if (json.schedules && Array.isArray(json.schedules)) {
-                json.schedules.forEach((sch: any) => {
-                    const empMap: Record<string, string> = {};
-                    if (sch.days && Array.isArray(sch.days)) {
-                        sch.days.forEach((d: any) => {
-                            if (d.date && d.shiftId) {
-                                empMap[d.date] = d.shiftId;
-                            }
-                        });
-                    }
-                    combinedAssignments[sch.employeeId] = empMap;
-                });
-            }
-        } catch (batchError) {
-            console.error(`Erro no lote ${i} a ${i + BATCH_SIZE}:`, batchError);
-        }
-    }
+    // Merge results
+    resultsArray.forEach(batchResult => {
+        combinedAssignments = { ...combinedAssignments, ...batchResult };
+    });
 
     if (onProgress) onProgress(totalEmployees, totalEmployees);
     return combinedAssignments;

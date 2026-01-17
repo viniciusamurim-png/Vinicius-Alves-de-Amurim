@@ -30,7 +30,6 @@ interface ContextMenuState {
   day?: number;
   columnKey?: string;
   assignmentType?: 'absence' | 'leave' | 'other';
-  hasAttachment?: boolean;
   isCommentMenu?: boolean;
 }
 
@@ -126,8 +125,6 @@ export const RosterGrid: React.FC<Props> = ({
   const footerScrollRef = useRef<HTMLDivElement>(null); 
   
   const internalClipboard = useRef<string | null>(null);
-  const fileInputRef = useRef<HTMLInputElement>(null);
-  const attachmentTarget = useRef<{employeeId: string, day: number} | null>(null);
   
   // Pagination State
   const [currentPage, setCurrentPage] = useState(1);
@@ -488,7 +485,7 @@ export const RosterGrid: React.FC<Props> = ({
       let assignmentType: ContextMenuState['assignmentType'] = 'other';
       if (shift?.category === 'absence' || shift?.category === 'leave') assignmentType = 'leave';
       
-      setContextMenu({ visible: true, type: 'cell', x: e.clientX, y: e.clientY, employeeId, day, assignmentType, hasAttachment: !!currentSchedule.attachments?.[employeeId]?.[dateKey], isCommentMenu: false });
+      setContextMenu({ visible: true, type: 'cell', x: e.clientX, y: e.clientY, employeeId, day, assignmentType, isCommentMenu: false });
   };
 
   const handleHeaderContextMenu = (e: React.MouseEvent, key: ExtendedColumnKey) => { 
@@ -497,10 +494,7 @@ export const RosterGrid: React.FC<Props> = ({
       setContextMenu({ visible: true, type: 'header', x: e.clientX, y: e.clientY, columnKey: key }); 
   };
   
-  const handleAttachFile = () => { if(contextMenu.employeeId && contextMenu.day) { attachmentTarget.current = { employeeId: contextMenu.employeeId, day: contextMenu.day }; fileInputRef.current?.click(); } setContextMenu(prev => ({...prev, visible: false})); };
   const handleAddComment = (comment: string) => { if (contextMenu.employeeId && contextMenu.day) { const dateKey = `${currentSchedule.year}-${String(currentSchedule.month + 1).padStart(2, '0')}-${String(contextMenu.day).padStart(2, '0')}`; setSchedule(prev => ({ ...prev, comments: { ...prev.comments, [contextMenu.employeeId!]: { ...(prev.comments?.[contextMenu.employeeId!] || {}), [dateKey]: comment } } })); } setContextMenu(prev => ({...prev, visible: false, isCommentMenu: false})); }
-  const handleDownloadAttachment = () => { if(contextMenu.employeeId && contextMenu.day) { const dateKey = `${currentSchedule.year}-${String(currentSchedule.month + 1).padStart(2, '0')}-${String(contextMenu.day).padStart(2, '0')}`; const attachment = currentSchedule.attachments?.[contextMenu.employeeId]?.[dateKey]; if (attachment) { const link = document.createElement("a"); link.href = attachment.data; link.download = attachment.name; document.body.appendChild(link); link.click(); document.body.removeChild(link); } } setContextMenu(prev => ({...prev, visible: false})); }
-  const handleFileSelected = (e: React.ChangeEvent<HTMLInputElement>) => { if (e.target.files && e.target.files[0] && attachmentTarget.current) { const file = e.target.files[0]; const { employeeId, day } = attachmentTarget.current; const dateKey = `${currentSchedule.year}-${String(currentSchedule.month + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`; const reader = new FileReader(); reader.onload = (event) => { const base64Data = event.target?.result as string; if (base64Data) { setSchedule(prev => ({ ...prev, attachments: { ...prev.attachments, [employeeId]: { ...(prev.attachments?.[employeeId] || {}), [dateKey]: { name: file.name, data: base64Data } } } })); } }; reader.readAsDataURL(file); } if (e.target) e.target.value = ''; };
   
   const handleSelectShift = (shiftId: string) => { 
       if (contextMenu.employeeId && contextMenu.day) { 
@@ -541,13 +535,13 @@ export const RosterGrid: React.FC<Props> = ({
           const dateKey = `${currentSchedule.year}-${String(currentSchedule.month + 1).padStart(2, '0')}-${String(contextMenu.day).padStart(2, '0')}`; 
           const newAssignments = { ...(currentSchedule.assignments[contextMenu.employeeId!] || {}) }; 
           delete newAssignments[dateKey]; 
-          const newAttachments = { ...(currentSchedule.attachments?.[contextMenu.employeeId!] || {}) }; if(newAttachments[dateKey]) delete newAttachments[dateKey]; 
+          // Note: Attachments cleanup removed as feature is disabled
           const newComments = { ...(currentSchedule.comments?.[contextMenu.employeeId!] || {}) }; if(newComments[dateKey]) delete newComments[dateKey]; 
           
           // Update Schedule State
           const updatedAssignments = { ...currentSchedule.assignments, [contextMenu.employeeId!]: newAssignments };
           
-          setSchedule(prev => ({ ...prev, assignments: updatedAssignments, attachments: { ...prev.attachments, [contextMenu.employeeId!]: newAttachments }, comments: { ...prev.comments, [contextMenu.employeeId!]: newComments } })); 
+          setSchedule(prev => ({ ...prev, assignments: updatedAssignments, comments: { ...prev.comments, [contextMenu.employeeId!]: newComments } })); 
           
           if (onScheduleChange) {
               const emp = employees.find(e => e.id === contextMenu.employeeId);
@@ -579,7 +573,6 @@ export const RosterGrid: React.FC<Props> = ({
     <div className="roster-bg bg-white rounded shadow-sm border border-slate-300 flex flex-col h-full w-full overflow-hidden select-none relative print:border-none print:shadow-none" onMouseUp={handleMouseUp} onMouseLeave={handleMouseLeaveGrid}>
       {/* Hidden Columns Button - Highest Z-Index in Grid Context */}
       {hiddenColumns.length > 0 && <button onClick={() => setHiddenColumns([])} title="Restaurar Colunas" className="absolute top-1 left-1 z-[90] bg-blue-100 text-blue-700 p-1.5 rounded-full shadow hover:bg-blue-200 print:hidden transition-all w-fit h-fit"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="w-4 h-4"><path d="M10 12.5a2.5 2.5 0 100-5 2.5 2.5 0 000 5z" /><path fillRule="evenodd" d="M.664 10.59a1.651 1.651 0 010-1.186A10.004 10.004 0 0110 3c4.257 0 7.893 2.66 9.336 6.41.147.381.146.804 0 1.186A10.004 10.004 0 0110 17c-4.257 0-7.893-2.66-9.336-6.41zM14 10a4 4 0 11-8 0 4 4 0 018 0z" clipRule="evenodd" /></svg></button>}
-      <input type="file" hidden ref={fileInputRef} accept=".png,.jpg,.jpeg,.pdf" onChange={handleFileSelected} />
 
       {/* Context Menu - Fixed Position to avoid clipping */}
       {contextMenu.visible && (
@@ -597,8 +590,6 @@ export const RosterGrid: React.FC<Props> = ({
                   </>
               ) : (
                   <>
-                    {contextMenu.assignmentType === 'leave' && <button onClick={handleAttachFile} className="w-full text-left px-4 py-2 hover:bg-blue-50 text-xs font-bold text-blue-700 border-b flex items-center gap-2">📎 Anexar Arquivo</button>}
-                    {contextMenu.hasAttachment && <button onClick={handleDownloadAttachment} className="w-full text-left px-4 py-2 hover:bg-green-50 text-xs font-bold text-green-700 border-b flex items-center gap-2">📥 Baixar Anexo</button>}
                     <button onClick={() => setContextMenu(prev => ({...prev, isCommentMenu: true}))} className="w-full text-left px-4 py-2 hover:bg-orange-50 text-xs font-bold text-orange-700 border-b flex items-center gap-2">💬 Adicionar Observação</button>
                     <button onClick={handleClearCell} className="w-full text-left px-4 py-2 hover:bg-red-50 text-xs text-red-600 font-bold border-b">Limpar</button>
                     <div className="max-h-60 overflow-y-auto">{shifts.map(shift => <button key={shift.id} onClick={() => handleSelectShift(shift.id)} className="w-full text-left px-4 py-2 hover:bg-blue-50 text-xs text-slate-700 flex items-center gap-2"><span className={`w-5 h-5 flex items-center justify-center rounded text-[10px] font-bold border ${shift.color} ${shift.textColor || 'text-slate-800'}`}>{shift.code}</span><span>{shift.name}</span></button>)}</div>
@@ -700,7 +691,6 @@ export const RosterGrid: React.FC<Props> = ({
                             const shift = shifts.find(s => s.id === shiftId);
                             const isOff = isWeekendOrHoliday(day);
                             const selected = isSelected(rowIndex, day);
-                            const attachment = currentSchedule.attachments?.[employee.id]?.[dateKey];
                             const comment = currentSchedule.comments?.[employee.id]?.[dateKey];
                             const isViolation = validation.invalidDays.includes(day);
 
@@ -714,7 +704,6 @@ export const RosterGrid: React.FC<Props> = ({
                                     ${selected ? 'ring-2 ring-inset ring-blue-600 bg-blue-100/50' : ''} 
                                     ${isReadOnly ? 'cursor-default' : 'cursor-pointer'}`}>
                                     {shift ? shift.code : ''}
-                                    {attachment && <Tooltip content={`Anexo: ${attachment.name}`}><span className="absolute top-0 right-0 text-[8px] cursor-help">📎</span></Tooltip>}
                                     {comment && <Tooltip content={`Obs: ${comment}`}><span className="absolute bottom-0 right-0 w-0 h-0 border-l-[6px] border-l-transparent border-b-[6px] border-b-orange-500"></span></Tooltip>}
                                 </div>
                             );

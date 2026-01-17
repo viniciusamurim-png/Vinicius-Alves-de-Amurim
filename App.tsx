@@ -1,4 +1,3 @@
-
 import React, { useState, useMemo, useEffect, useCallback, useRef } from 'react';
 import { INITIAL_EMPLOYEES, INITIAL_SHIFTS, MONTH_NAMES, INITIAL_UNITS, INITIAL_SECTORS, INITIAL_SHIFT_TYPES } from './constants.ts';
 import { Employee, MonthlySchedule, Shift, AIRulesConfig, StaffingConfig, User, ScheduleChange } from './types.ts';
@@ -78,8 +77,8 @@ const App: React.FC = () => {
   
   const [schedule, setScheduleState] = useState<MonthlySchedule>({ month: currentDate.getMonth(), year: currentDate.getFullYear(), assignments: {}, attachments: {}, comments: {} });
   
-  const dirtyRegisters = useRef<Map<string, ScheduleChange>>(new Map());
-  const dirtyEmployeeMetadata = useRef<Set<string>>(new Set());
+  const dirtyRegisters = useRef(new Map<string, ScheduleChange>());
+  const dirtyEmployeeMetadata = useRef(new Set<string>());
 
   const [historyPast, setHistoryPast] = useState<MonthlySchedule[]>([]);
   const [historyFuture, setHistoryFuture] = useState<MonthlySchedule[]>([]);
@@ -89,6 +88,10 @@ const App: React.FC = () => {
   const [isSaving, setIsSaving] = useState(false);
   const [showSyncConfirm, setShowSyncConfirm] = useState(false);
   const [isCloudSyncing, setIsCloudSyncing] = useState(false);
+  
+  // GERAÇÃO IA
+  const [isGenerating, setIsGenerating] = useState(false);
+  const [genProgress, setGenProgress] = useState(0);
 
   const [isSaved, setIsSaved] = useState(false);
   const [showUserMgmt, setShowUserMgmt] = useState(false);
@@ -173,6 +176,15 @@ const App: React.FC = () => {
                           Object.keys(remoteDays).forEach(dayNum => {
                                 const code = remoteDays[dayNum];
                                 const dateKey = `${prev.year}-${String(prev.month + 1).padStart(2, '0')}-${String(dayNum).padStart(2, '0')}`;
+                                
+                                // CRITICAL: Check if this cell is currently "dirty" (unsaved local change)
+                                // The key format in dirtyRegisters is: employeeId-year-monthIndex-day
+                                const dirtyKey = `${empId}-${prev.year}-${prev.month}-${dayNum}`;
+                                if (dirtyRegisters.current.has(dirtyKey)) {
+                                    // Skip this update because local user has unsaved changes that take precedence
+                                    return;
+                                }
+
                                 const shift = shifts.find(s => s.code === code);
                                 const currentShiftId = newAssignments[empId][dateKey];
                                 
@@ -185,6 +197,13 @@ const App: React.FC = () => {
                           const daysInMonthCount = getDaysInMonth(prev.month, prev.year);
                           for (let d = 1; d <= daysInMonthCount; d++) {
                               const dk = `${prev.year}-${String(prev.month + 1).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
+                              
+                              // Check if we are deleting locally (dirty) - if so, don't let remote "undelete" it
+                              const dirtyKey = `${empId}-${prev.year}-${prev.month}-${d}`;
+                              if (dirtyRegisters.current.has(dirtyKey)) {
+                                  continue;
+                              }
+
                               if (newAssignments[empId][dk] && !remoteDays[d]) {
                                   delete newAssignments[empId][dk];
                                   changed = true;
@@ -219,7 +238,7 @@ const App: React.FC = () => {
       setIsSaving(true);
       try {
           // 1. Sincronizar alterações na escala (dias específicos)
-          const changesToSync = Array.from(dirtyRegisters.current.values());
+          const changesToSync = Array.from(dirtyRegisters.current.values()) as ScheduleChange[];
           if (changesToSync.length > 0 && currentUser) {
               await GoogleSheetsService.syncScheduleChanges(changesToSync, currentUser);
           }
@@ -317,11 +336,95 @@ const App: React.FC = () => {
       setSchedule(prev => {
           const nextAssignments = { ...prev.assignments };
           ids.forEach(id => {
+              // Iterate currently assigned days to mark them as deleted in dirtyRegisters
+              const empAssignments = nextAssignments[id];
+              if (empAssignments) {
+                  Object.keys(empAssignments).forEach(dateKey => {
+                      // dateKey is YYYY-MM-DD
+                      const [y, m, d] = dateKey.split('-').map(Number);
+                      const key = `${id}-${y}-${m-1}-${d}`;
+                      const emp = employees.find(e => e.id === id);
+                      if (emp) {
+                          dirtyRegisters.current.set(key, {
+                              employeeId: id,
+                              day: d,
+                              shiftCode: '', // Empty means delete
+                              employee: emp,
+                              totalDaysOff: 0,
+                              month: m - 1,
+                              year: y
+                          });
+                      }
+                  });
+              }
               nextAssignments[id] = {};
           });
           return { ...prev, assignments: nextAssignments };
       });
       setHasUnsavedChanges(true);
+  };
+
+  // --- IA GENERATION HANDLER ---
+  const handleGenerateAI = async (selectedIds: string[]) => {
+      if (!canEdit) return;
+      setIsGenerating(true);
+      setGenProgress(0);
+
+      const targetEmployees = employees.filter(e => selectedIds.includes(e.id));
+
+      try {
+          const result = await generateAISchedule(
+              targetEmployees,
+              shifts,
+              schedule.month, 
+              schedule.year,
+              aiRules,
+              (current, total) => setGenProgress(Math.round((current / total) * 100))
+          );
+
+          if (result) {
+              setSchedule(prev => {
+                  const newAssignments = { ...prev.assignments };
+                  
+                  Object.keys(result).forEach(empId => {
+                      if (!newAssignments[empId]) newAssignments[empId] = {};
+                      
+                      const empResult = result[empId];
+                      Object.keys(empResult).forEach(dateKey => {
+                           const shiftId = empResult[dateKey];
+                           newAssignments[empId][dateKey] = shiftId;
+                           
+                           // Add to Dirty Registers for Sync
+                           const shift = shifts.find(s => s.id === shiftId);
+                           const emp = employees.find(e => e.id === empId);
+                           if (shift && emp) {
+                               const [y, m, d] = dateKey.split('-').map(Number);
+                               // dirtyRegisters key format: employeeId-year-monthIndex-day
+                               const drKey = `${empId}-${y}-${m-1}-${d}`; 
+                               dirtyRegisters.current.set(drKey, {
+                                   employeeId: empId,
+                                   day: d,
+                                   shiftCode: shift.code,
+                                   employee: emp,
+                                   totalDaysOff: 0,
+                                   month: m - 1,
+                                   year: y
+                               });
+                           }
+                      });
+                  });
+
+                  return { ...prev, assignments: newAssignments };
+              });
+              setHasUnsavedChanges(true);
+          }
+      } catch (err) {
+          console.error(err);
+          alert('Erro ao gerar escala. Verifique o console.');
+      } finally {
+          setIsGenerating(false);
+          setGenProgress(0);
+      }
   };
 
   if (!currentUser) return <LoginScreen onLogin={handleLogin} />;
@@ -395,11 +498,25 @@ const App: React.FC = () => {
                <div className="h-full w-full"><EmployeeDatabaseScreen employees={employees} setEmployees={setEmployees} units={units} sectors={sectors} shiftTypes={shiftTypesList} /></div>
           ) : (<ReportsScreen employees={filteredEmployees} schedule={schedule} shifts={shifts} />)}
       </main>
+      
+      {/* Loading Overlay */}
+      {isGenerating && (
+          <div className="fixed inset-0 z-[100] bg-black/80 flex flex-col items-center justify-center text-white backdrop-blur-sm">
+              <div className="w-16 h-16 border-4 border-blue-500 border-t-transparent rounded-full animate-spin mb-4"></div>
+              <h2 className="text-xl font-bold mb-2">Gerando Escala Inteligente...</h2>
+              <p className="text-sm text-slate-300 mb-6">Processando regras CLT, descansos e preferências.</p>
+              <div className="w-64 h-2 bg-slate-700 rounded-full overflow-hidden border border-slate-600">
+                  <div className="h-full bg-blue-500 transition-all duration-300 ease-out" style={{ width: `${genProgress}%` }}></div>
+              </div>
+              <p className="text-xs font-bold mt-2 text-blue-300">{genProgress}% Concluído</p>
+          </div>
+      )}
+
       <RulesModal isOpen={showRules} onClose={() => setShowRules(false)} rules={aiRules} setRules={setAiRules} />
       <StaffingModal isOpen={showStaffing} onClose={() => setShowStaffing(false)} employees={employees} config={staffingConfig} setConfig={setStaffingConfig} />
       {showShifts && <ShiftManager shifts={shifts} setShifts={setShifts} onClose={() => setShowShifts(false)} />}
       {showUserMgmt && <UserManagement onClose={() => setShowUserMgmt(false)} availableUnits={units} employees={employees} />}
-      <GenerationScopeModal isOpen={showGenerationScope} onClose={() => setShowGenerationScope(false)} employees={filteredEmployees} onConfirm={(ids) => { alert('Geração IA em implementação para este escopo.'); }} />
+      <GenerationScopeModal isOpen={showGenerationScope} onClose={() => setShowGenerationScope(false)} employees={filteredEmployees} onConfirm={handleGenerateAI} />
       <FilterManagerModal isOpen={filterManager.isOpen} onClose={() => setFilterManager({ isOpen: false, type: null })} title={filterManager.type || ''} items={filterManager.type === 'Unit' ? units : filterManager.type === 'Sector' ? sectors : shiftTypesList} setItems={filterManager.type === 'Unit' ? setUnits : filterManager.type === 'Sector' ? setSectors : setShiftTypesList} />
       <GenerationScopeModal isOpen={clearScopeModalOpen} onClose={() => setClearScopeModalOpen(false)} employees={filteredEmployees} onConfirm={handleClearScale} />
       <ConfirmationModal isOpen={showSyncConfirm} onClose={() => setShowSyncConfirm(false)} onConfirm={handleSync} title="Confirmar Sincronização" message="Deseja atualizar a lista de colaboradores via Google Sheets?" confirmText="Sincronizar" />
