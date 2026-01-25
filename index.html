@@ -67,7 +67,7 @@
             -webkit-print-color-adjust: exact !important;
             print-color-adjust: exact !important;
             background-color: white !important;
-            zoom: 0.55; /* Scale down to fit wide grid */
+            zoom: 0.60; /* Slightly larger to be legible, flex layout will fit width */
             min-width: 1024px;
         }
 
@@ -95,14 +95,12 @@
 
         /* Specific fix for the grid container width */
         .roster-scroll-container {
-             width: max-content !important;
-             /* Removed min-width: 100% to avoid extra empty space on right */
+             width: 100% !important; /* Force full width */
         }
 
         /* Ensure rows maintain structure */
         .print-row {
-            width: max-content !important;
-            /* Removed min-width: 100% to avoid extra empty space on right */
+            width: 100% !important; /* Force rows to fill container */
             height: 34px !important; /* Enforce height */
             display: flex !important;
             break-inside: avoid;

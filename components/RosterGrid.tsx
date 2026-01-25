@@ -624,7 +624,7 @@ export const RosterGrid: React.FC<Props> = ({
         onScroll={handleGridScroll}
       >
         {/* HEADER - STICKY TOP */}
-        <div className="sticky top-0 z-[60] bg-company-blue text-white shadow-md w-fit flex min-w-max print:static print:shadow-none">
+        <div className="sticky top-0 z-[60] bg-company-blue text-white shadow-md w-fit flex min-w-max print:static print:shadow-none print:w-full">
             <div className="flex-shrink-0 flex border-r border-blue-800 bg-company-blue z-50 print:border-slate-300">
                 {visibleColumns.map((key) => {
                     const isFrozen = frozenColumns.includes(key); const left = getStickyLeft(key);
@@ -635,15 +635,15 @@ export const RosterGrid: React.FC<Props> = ({
                     </div>
                 )})}
             </div>
-            <div className="flex min-w-max">
-                {daysArray.map(day => (<div key={day} className={`w-8 flex flex-col items-center justify-center border-r border-blue-800 print:border-slate-300 ${isWeekendOrHoliday(day) ? 'bg-sky-500/30' : ''}`} title={getHolidayName(day)}><span className="text-[9px] font-medium opacity-80 uppercase">{getDayLabel(day).substring(0, 1)}</span><span className="text-[10px] font-bold">{String(day).padStart(2, '0')}</span></div>))}
+            <div className="flex min-w-max print:flex-1">
+                {daysArray.map(day => (<div key={day} className={`w-8 flex flex-col items-center justify-center border-r border-blue-800 print:border-slate-300 print:flex-1 print:w-auto ${isWeekendOrHoliday(day) ? 'bg-sky-500/30' : ''}`} title={getHolidayName(day)}><span className="text-[9px] font-medium opacity-80 uppercase">{getDayLabel(day).substring(0, 1)}</span><span className="text-[10px] font-bold">{String(day).padStart(2, '0')}</span></div>))}
                  <div className="w-16 flex-shrink-0 p-2 font-bold text-[10px] border-r border-blue-800 flex items-center justify-center bg-company-blue print:border-slate-300">FOLGAS</div>
                  <div className="w-10 flex-shrink-0 p-2 font-bold text-[10px] border-r border-blue-800 flex items-center justify-center bg-company-blue print:border-slate-300">ST</div>
             </div>
         </div>
 
         {/* BODY */}
-        <div className="flex flex-col min-w-max">
+        <div className="flex flex-col min-w-max print:w-full">
             {paginatedEmployees.map((employee, idx) => {
             const rowIndex = (currentPage - 1) * ITEMS_PER_PAGE + idx;
             const validation = validateSchedule(employee.id, currentSchedule, shifts, rules, employees);
@@ -703,7 +703,7 @@ export const RosterGrid: React.FC<Props> = ({
                         })}
                     </div>
                     {/* Grid */}
-                    <div className="flex">
+                    <div className="flex print:flex-1">
                         {daysArray.map(day => {
                             const dateKey = `${currentSchedule.year}-${String(currentSchedule.month + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
                             const shiftId = currentSchedule.assignments[employee.id]?.[dateKey];
@@ -719,7 +719,7 @@ export const RosterGrid: React.FC<Props> = ({
 
                             return (
                                 <div key={day} onMouseDown={(e) => handleMouseDown(e, rowIndex, day)} onMouseEnter={() => handleMouseEnter(rowIndex, day)} onContextMenu={(e) => handleCellContextMenu(e, employee.id, day)} 
-                                className={`w-8 h-full flex items-center justify-center text-[10px] font-bold select-none relative 
+                                className={`w-8 h-full flex items-center justify-center text-[10px] font-bold select-none relative print:flex-1 print:w-auto
                                     ${isViolation ? 'border border-red-400 z-10' : 'border-r border-slate-300'}
                                     ${cellBackground}
                                     ${shift?.textColor ? shift.textColor : 'text-slate-700'} 
