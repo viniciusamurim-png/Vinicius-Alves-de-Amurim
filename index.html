@@ -1,3 +1,4 @@
+
 <!DOCTYPE html>
 <html lang="pt-BR">
   <head>
@@ -60,52 +61,48 @@
             size: landscape;
             margin: 5mm;
         }
+        
+        /* Force background colors and exact appearance */
         body {
-            background-color: white !important;
             -webkit-print-color-adjust: exact !important;
             print-color-adjust: exact !important;
-            width: 100%;
-            height: 100%;
-            overflow: visible !important;
-            zoom: 0.75; /* Scale down to fit more columns */
+            background-color: white !important;
+            zoom: 0.65; /* Scale down slightly to fit columns */
         }
-        #root {
-            width: 100%;
-        }
-        
-        /* Force background colors */
+
+        /* Ensure all elements respect color printing */
         * {
             -webkit-print-color-adjust: exact !important;
             print-color-adjust: exact !important;
             color-adjust: exact !important;
         }
         
-        /* Hide UI elements */
-        button, input[type="file"], .print\:hidden, nav, header {
+        /* Hide UI elements navigation */
+        button, input[type="file"], .print\:hidden, nav, header, .no-print {
             display: none !important;
         }
         
-        /* Ensure specific print elements are shown */
-        .print\:block {
-            display: block !important;
-        }
-        .print\:flex {
-            display: flex !important;
-        }
-        
-        /* Expand containers */
+        /* Allow containers to flow */
         .overflow-auto, .overflow-hidden, .roster-bg {
             overflow: visible !important;
             height: auto !important;
             max-height: none !important;
-            width: 100% !important;
+            width: fit-content !important;
+            min-width: 100% !important;
             border: none !important;
             box-shadow: none !important;
+            display: block !important;
+        }
+        
+        /* Fix sticky positioning breaking in print */
+        .sticky {
+            position: static !important;
         }
 
         /* Prevent page breaks inside rows */
-        tr, .group {
+        tr, .group, .flex-row {
             break-inside: avoid;
+            page-break-inside: avoid;
         }
       }
     </style>
@@ -126,3 +123,4 @@
   <script type="module" src="/index.tsx"></script>
 </body>
 </html>
+    

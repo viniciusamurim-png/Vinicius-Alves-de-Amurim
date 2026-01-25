@@ -1,3 +1,4 @@
+
 import React, { useMemo, useState, useEffect, useRef } from 'react';
 import { Employee, Shift, MonthlySchedule, AIRulesConfig, StaffingConfig, GridSelection, ExtendedColumnKey, ScheduleChange } from '../types';
 import { getDaysInMonth, validateSchedule, calculateRequiredDaysOff } from '../services/schedulerService';
@@ -579,7 +580,7 @@ export const RosterGrid: React.FC<Props> = ({
       <div className="hidden print:flex flex-col mb-4 px-2 pt-2 border-b-2 border-slate-800 pb-2">
            <div className="flex justify-between items-end">
                <div>
-                   <h1 className="text-2xl font-bold uppercase text-slate-900 tracking-tight">ESCALA MENSAL - PREVENT SENIOR</h1>
+                   <h1 className="text-2xl font-bold uppercase text-company-blue tracking-tight">ESCALA MENSAL - PREVENT SENIOR</h1>
                    <h2 className="text-lg font-bold text-slate-700 uppercase">{MONTH_NAMES[currentSchedule.month]} / {currentSchedule.year}</h2>
                </div>
                <div className="text-right">
@@ -623,21 +624,21 @@ export const RosterGrid: React.FC<Props> = ({
         onScroll={handleGridScroll}
       >
         {/* HEADER - STICKY TOP */}
-        <div className="sticky top-0 z-[60] bg-company-blue text-white shadow-md w-fit flex min-w-max print:bg-white print:text-black print:border-b-2 print:border-black print:static print:shadow-none">
-            <div className="flex-shrink-0 flex border-r border-blue-800 bg-company-blue z-50 print:bg-white print:border-black">
+        <div className="sticky top-0 z-[60] bg-company-blue text-white shadow-md w-fit flex min-w-max print:static print:shadow-none">
+            <div className="flex-shrink-0 flex border-r border-blue-800 bg-company-blue z-50 print:border-slate-300">
                 {visibleColumns.map((key) => {
                     const isFrozen = frozenColumns.includes(key); const left = getStickyLeft(key);
                     return (
-                    <div key={key} style={{ width: colWidths[key], position: isFrozen ? 'sticky' : 'relative', left: isFrozen ? left : 'auto', zIndex: isFrozen ? 60 : 'auto' }} onClick={() => setSortConfig(prev => ({ key, direction: prev.key === key && prev.direction === 'asc' ? 'desc' : 'asc' }))} onContextMenu={(e) => handleHeaderContextMenu(e, key)} className={`relative p-2 font-bold text-[10px] border-r border-blue-800 flex items-center justify-center overflow-hidden whitespace-nowrap cursor-pointer hover:bg-blue-900 group ${isFrozen ? 'bg-company-blue shadow-[2px_0_5px_rgba(0,0,0,0.2)]' : ''} print:bg-white print:text-black print:border-black print:shadow-none`}>
+                    <div key={key} style={{ width: colWidths[key], position: isFrozen ? 'sticky' : 'relative', left: isFrozen ? left : 'auto', zIndex: isFrozen ? 60 : 'auto' }} onClick={() => setSortConfig(prev => ({ key, direction: prev.key === key && prev.direction === 'asc' ? 'desc' : 'asc' }))} onContextMenu={(e) => handleHeaderContextMenu(e, key)} className={`relative p-2 font-bold text-[10px] border-r border-blue-800 flex items-center justify-center overflow-hidden whitespace-nowrap cursor-pointer hover:bg-blue-900 group ${isFrozen ? 'bg-company-blue shadow-[2px_0_5px_rgba(0,0,0,0.2)]' : ''} print:border-slate-300 print:shadow-none`}>
                         {labelMap[key]} {sortConfig.key === key && <span className="ml-1 text-[8px]">{sortConfig.direction === 'asc' ? '▲' : '▼'}</span>}
                         <div className="absolute right-0 top-0 bottom-0 w-1 cursor-col-resize hover:bg-blue-400 z-50 group-hover:bg-blue-600/50 print:hidden" onMouseDown={(e) => handleResizeStart(e, key)} onClick={(e) => e.stopPropagation()}/>
                     </div>
                 )})}
             </div>
             <div className="flex min-w-max">
-                {daysArray.map(day => (<div key={day} className={`w-8 flex flex-col items-center justify-center border-r border-blue-800 print:border-black print:border-r ${isWeekendOrHoliday(day) ? 'bg-sky-500/30 print:bg-gray-200' : ''}`} title={getHolidayName(day)}><span className="text-[9px] font-medium opacity-80 uppercase">{getDayLabel(day).substring(0, 1)}</span><span className="text-[10px] font-bold">{String(day).padStart(2, '0')}</span></div>))}
-                 <div className="w-16 flex-shrink-0 p-2 font-bold text-[10px] border-r border-blue-800 flex items-center justify-center bg-company-blue print:bg-white print:text-black print:border-black">FOLGAS</div>
-                 <div className="w-10 flex-shrink-0 p-2 font-bold text-[10px] border-r border-blue-800 flex items-center justify-center bg-company-blue print:bg-white print:text-black print:border-black">ST</div>
+                {daysArray.map(day => (<div key={day} className={`w-8 flex flex-col items-center justify-center border-r border-blue-800 print:border-slate-300 ${isWeekendOrHoliday(day) ? 'bg-sky-500/30' : ''}`} title={getHolidayName(day)}><span className="text-[9px] font-medium opacity-80 uppercase">{getDayLabel(day).substring(0, 1)}</span><span className="text-[10px] font-bold">{String(day).padStart(2, '0')}</span></div>))}
+                 <div className="w-16 flex-shrink-0 p-2 font-bold text-[10px] border-r border-blue-800 flex items-center justify-center bg-company-blue print:border-slate-300">FOLGAS</div>
+                 <div className="w-10 flex-shrink-0 p-2 font-bold text-[10px] border-r border-blue-800 flex items-center justify-center bg-company-blue print:border-slate-300">ST</div>
             </div>
         </div>
 
@@ -651,9 +652,9 @@ export const RosterGrid: React.FC<Props> = ({
             const isExcessDaysOff = daysOffCount > targetDaysOff;
 
             return (
-                <div key={employee.id} className="flex border-b border-slate-300 bg-white hover:bg-blue-50 transition-colors group h-9 print:border-black print:h-auto">
+                <div key={employee.id} className="flex border-b border-slate-300 bg-white hover:bg-blue-50 transition-colors group h-9 print:h-auto">
                     {/* Left Cols */}
-                    <div draggable={!isReadOnly} onDragStart={(e) => handleDragStart(e, employee.id)} onDrop={(e) => handleDrop(e, employee.id)} onDragOver={(e) => e.preventDefault()} className="flex-shrink-0 flex border-r border-slate-300 bg-white z-10 group-hover:bg-blue-50 cursor-move print:border-black">
+                    <div draggable={!isReadOnly} onDragStart={(e) => handleDragStart(e, employee.id)} onDrop={(e) => handleDrop(e, employee.id)} onDragOver={(e) => e.preventDefault()} className="flex-shrink-0 flex border-r border-slate-300 bg-white z-10 group-hover:bg-blue-50 cursor-move">
                         {visibleColumns.map(key => {
                             let val = key === 'scale' ? employee.shiftPattern : key === 'time' ? employee.workTime : key === 'position' ? employee.positionNumber : key === 'council' ? employee.categoryCode : key === 'bh' ? employee.bankHoursBalance : key === 'uf' ? employee.lastDayOff : (employee as any)[key];
                             
@@ -668,7 +669,7 @@ export const RosterGrid: React.FC<Props> = ({
                             const canEditCell = !isReadOnly && (key === 'shiftType' || key === 'uf');
 
                             return (
-                                <div key={key} style={{ width: colWidths[key], position: isFrozen ? 'sticky' : 'relative', left: isFrozen ? left : 'auto', zIndex: isFrozen ? 50 : 'auto' }} className={`flex items-center px-2 border-r border-slate-100 overflow-hidden bg-white group-hover:bg-blue-50 ${isFrozen ? 'shadow-[2px_0_5px_rgba(0,0,0,0.05)]' : ''} print:border-black print:shadow-none`}>
+                                <div key={key} style={{ width: colWidths[key], position: isFrozen ? 'sticky' : 'relative', left: isFrozen ? left : 'auto', zIndex: isFrozen ? 50 : 'auto' }} className={`flex items-center px-2 border-r border-slate-100 overflow-hidden bg-white group-hover:bg-blue-50 ${isFrozen ? 'shadow-[2px_0_5px_rgba(0,0,0,0.05)]' : ''} print:shadow-none`}>
                                     {canEditCell ? (
                                         key === 'uf' ? (
                                             <div className="relative w-full h-full flex items-center justify-between px-1 group/uf">
@@ -696,7 +697,7 @@ export const RosterGrid: React.FC<Props> = ({
                                         ) : (
                                             <input type="text" className="w-full bg-transparent border-none text-[10px] uppercase font-medium focus:ring-1 focus:ring-blue-500 rounded px-1 min-w-0 h-full" value={val || ''} onChange={(e) => { if (onUpdateEmployee) onUpdateEmployee(employee.id, 'shiftType', e.target.value); }} onKeyDown={(e) => { e.stopPropagation(); if (e.key === 'Enter') e.currentTarget.blur(); }} />
                                         )
-                                    ) : (<span className={`text-[9px] truncate uppercase font-medium ${colorClass} print:text-black`} title={val}>{displayVal}</span>)}
+                                    ) : (<span className={`text-[9px] truncate uppercase font-medium ${colorClass}`} title={val}>{displayVal}</span>)}
                                 </div>
                             )
                         })}
@@ -714,12 +715,12 @@ export const RosterGrid: React.FC<Props> = ({
 
                             // Background Priority: Shift Color > Weekend/Holiday Column Color > Transparent
                             // Using bg-sky-500/10 for weekend columns to match header style but lighter.
-                            const cellBackground = shift ? shift.color : (isOff ? 'bg-sky-500/10 print:bg-gray-200' : 'bg-transparent');
+                            const cellBackground = shift ? shift.color : (isOff ? 'bg-sky-500/10' : 'bg-transparent');
 
                             return (
                                 <div key={day} onMouseDown={(e) => handleMouseDown(e, rowIndex, day)} onMouseEnter={() => handleMouseEnter(rowIndex, day)} onContextMenu={(e) => handleCellContextMenu(e, employee.id, day)} 
                                 className={`w-8 h-full flex items-center justify-center text-[10px] font-bold select-none relative 
-                                    ${isViolation ? 'border border-red-400 z-10 print:border-black' : 'border-r border-slate-300 print:border-black'}
+                                    ${isViolation ? 'border border-red-400 z-10' : 'border-r border-slate-300'}
                                     ${cellBackground}
                                     ${shift?.textColor ? shift.textColor : 'text-slate-700'} 
                                     ${selected ? 'ring-2 ring-inset ring-blue-600 bg-blue-100/50 print:ring-0' : ''} 
@@ -729,8 +730,8 @@ export const RosterGrid: React.FC<Props> = ({
                                 </div>
                             );
                         })}
-                         <div className={`w-16 flex-shrink-0 border-r border-slate-300 flex items-center justify-center text-[10px] bg-slate-50 font-bold ${isExcessDaysOff ? 'text-red-600' : 'text-slate-700'} print:border-black print:text-black print:bg-white`}>{String(daysOffCount).padStart(2, '0')}/{String(targetDaysOff).padStart(2, '0')}</div>
-                         <div className="w-10 flex-shrink-0 border-r border-slate-300 flex items-center justify-center bg-slate-50 relative group/st print:border-black print:bg-white">
+                         <div className={`w-16 flex-shrink-0 border-r border-slate-300 flex items-center justify-center text-[10px] bg-slate-50 font-bold ${isExcessDaysOff ? 'text-red-600' : 'text-slate-700'} print:bg-white`}>{String(daysOffCount).padStart(2, '0')}/{String(targetDaysOff).padStart(2, '0')}</div>
+                         <div className="w-10 flex-shrink-0 border-r border-slate-300 flex items-center justify-center bg-slate-50 relative group/st print:bg-white">
                              {validation.valid ? <span className="text-green-500 font-bold print:hidden">✔</span> : (
                                 <div className="relative flex justify-center w-full h-full items-center">
                                     <span className="text-red-500 font-bold cursor-help text-xs print:hidden">⚠</span>
