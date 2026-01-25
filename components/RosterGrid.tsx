@@ -620,7 +620,7 @@ export const RosterGrid: React.FC<Props> = ({
       {/* UNIFIED SCROLLABLE AREA */}
       <div 
         ref={gridContainerRef}
-        className="flex-1 overflow-auto w-full relative print:overflow-visible print:h-auto"
+        className="flex-1 overflow-auto w-full relative roster-scroll-container print:overflow-visible print:h-auto"
         onScroll={handleGridScroll}
       >
         {/* HEADER - STICKY TOP */}
@@ -652,7 +652,7 @@ export const RosterGrid: React.FC<Props> = ({
             const isExcessDaysOff = daysOffCount > targetDaysOff;
 
             return (
-                <div key={employee.id} className="flex border-b border-slate-300 bg-white hover:bg-blue-50 transition-colors group h-9 print:h-auto">
+                <div key={employee.id} className="flex border-b border-slate-300 bg-white hover:bg-blue-50 transition-colors group h-9 print-row">
                     {/* Left Cols */}
                     <div draggable={!isReadOnly} onDragStart={(e) => handleDragStart(e, employee.id)} onDrop={(e) => handleDrop(e, employee.id)} onDragOver={(e) => e.preventDefault()} className="flex-shrink-0 flex border-r border-slate-300 bg-white z-10 group-hover:bg-blue-50 cursor-move">
                         {visibleColumns.map(key => {

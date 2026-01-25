@@ -59,7 +59,7 @@
       @media print {
         @page {
             size: landscape;
-            margin: 5mm;
+            margin: 3mm;
         }
         
         /* Force background colors and exact appearance */
@@ -67,7 +67,8 @@
             -webkit-print-color-adjust: exact !important;
             print-color-adjust: exact !important;
             background-color: white !important;
-            zoom: 0.65; /* Scale down slightly to fit columns */
+            zoom: 0.55; /* Scale down to fit wide grid */
+            min-width: 1024px;
         }
 
         /* Ensure all elements respect color printing */
@@ -87,11 +88,24 @@
             overflow: visible !important;
             height: auto !important;
             max-height: none !important;
-            width: fit-content !important;
-            min-width: 100% !important;
             border: none !important;
             box-shadow: none !important;
             display: block !important;
+        }
+
+        /* Specific fix for the grid container width */
+        .roster-scroll-container {
+             width: max-content !important;
+             min-width: 100% !important;
+        }
+
+        /* Ensure rows maintain structure */
+        .print-row {
+            width: max-content !important;
+            min-width: 100% !important;
+            height: 34px !important; /* Enforce height */
+            display: flex !important;
+            break-inside: avoid;
         }
         
         /* Fix sticky positioning breaking in print */
@@ -123,4 +137,3 @@
   <script type="module" src="/index.tsx"></script>
 </body>
 </html>
-    
