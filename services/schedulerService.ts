@@ -153,41 +153,70 @@ const processBatch = async (
     endDate: string
 ): Promise<Record<string, Record<string, string>>> => {
     
-    const prompt = `
-      Atue como especialista em escalas de trabalho CLT.
-      Gere os dias de FOLGA ("${folgaId}") e DESCANSO ("${dsrId}") para o período ${startDate} a ${endDate}.
-      
-      IMPORTANTE: Retorne APENAS os dias que NÃO são trabalho (F ou DSR). Os dias de trabalho devem ficar vazios (null).
+    // --- TRADUÇÃO DINÂMICA DE REGRAS PARA O PROMPT ---
+    
+    // 1. Preferência de Domingo
+    const ruleSunday6x1 = rules.preferSundayOff 
+        ? "- PRIORIDADE DOMINGO [ON]: Tente alocar folgas aos Domingos sempre que a escala permitir (respeitando o mínimo de equipe). Para mulheres, PRIORIDADE MÁXIMA." 
+        : "- PRIORIDADE DOMINGO [OFF]: As folgas devem ser distribuídas ao longo da semana. Não priorize domingos.";
 
-      REGRAS GERAIS:
-      1. Considere 'lastDayOff' para determinar se o dia 1 do mês é trabalho ou folga (especialmente para 12x36).
-      2. Não deixe todos os colaboradores do mesmo setor folgarem no mesmo dia (para escalas diárias).
+    const ruleSunday5x2 = rules.preferSundayOff
+        ? "- PRIORIDADE DOMINGO [ON]: As folgas DEVEM ser preferencialmente Sábado e Domingo."
+        : "- PRIORIDADE DOMINGO [OFF]: As folgas podem cair em dias úteis (Ex: Seg/Ter). Distribua aleatoriamente, evite fixar em Sáb/Dom.";
+
+    // 2. Frequência de Domingos (Lei)
+    const ruleSundayFreq = `- FREQUÊNCIA: Garanta pelo menos 1 folga no Domingo a cada ${rules.sundayOffFrequency} semanas (para mulheres, tente a cada 15 dias).`;
+
+    // 3. Dobradinhas (Dias Consecutivos)
+    const ruleConsecutive = rules.preferConsecutiveDaysOff
+        ? "- DOBRADINHAS [ON]: Se o colaborador tiver mais de 1 folga na semana, AGRUPE OS DIAS (Ex: Sábado+Domingo, ou Domingo+Segunda). Evite folgas isoladas."
+        : "- DOBRADINHAS [OFF]: Não é necessário agrupar as folgas. Podem ser espaçadas.";
+
+    // 4. Folgas Extras
+    const ruleExtra = rules.allowExtraDaysOff
+        ? `- FOLGAS EXTRAS [ON]: Você TEM PERMISSÃO para adicionar até ${rules.extraDaysOffCount} dias de folga EXTRAS no mês se ajudar a resolver conflitos de escala ou regras de descanso.`
+        : "- FOLGAS EXTRAS [OFF]: Gere estritamente a quantidade de folgas obrigatórias (Domingos + Feriados). Não dê folgas a mais.";
+
+    // 5. Intervalo
+    const ruleRest = `- INTERVALO: Respeite rigorosamente o intervalo mínimo de ${rules.minRestHours} horas entre turnos.`;
+
+
+    const prompt = `
+      Atue como especialista em escalas de trabalho CLT e gere o cronograma de folgas.
       
+      OBJETIVO:
+      Gere os dias de FOLGA ("${folgaId}") e DESCANSO ("${dsrId}") para o período ${startDate} a ${endDate}.
+      Retorne APENAS os dias que NÃO são trabalho. Dias de trabalho = null.
+
+      REGRAS GLOBAIS DE COMPORTAMENTO (ATENÇÃO MÁXIMA):
+      1. ${ruleRest}
+      2. Respeite o limite máximo de ${rules.maxConsecutiveDays} dias de trabalho consecutivos SEM EXCEÇÃO. Use 'lastDayOff' para calcular o início.
+      3. ${ruleSundayFreq}
+
       REGRAS POR TIPO DE ESCALA:
       
       [ESCALA 12x36]
-      - ESSENCIAL: Você DEVE gerar os dias de descanso ("${dsrId}") alternados com os dias de trabalho.
-      - O padrão é: Dia sim (Trabalho/Null), Dia não (Descanso/${dsrId}).
-      - Verifique 'lastDayOff' para saber a sequência correta. Se lastDayOff foi o último dia do mês anterior, dia 1 é Trabalho. Se foi o penúltimo, dia 1 é DSR.
-      - ALÉM do padrão 1x1, aplique a "Folga Extra Quinzenal": O colaborador precisa de 1 folga extra ("${folgaId}") a cada quinzena.
-      - A folga extra ("${folgaId}") SUBSTITUI um dia que seria de trabalho na sequência.
-      - Resultado visual esperado no JSON para a sequência: ... DSR | ${folgaId} | DSR ... (Onde ${folgaId} tomou o lugar de um dia de trabalho).
-      - NUNCA retorne null (trabalho) para os dias que devem ser DSR. Eles precisam ser preenchidos explicitamente com "${dsrId}".
+      - Padrão: Trabalho (null) / Descanso ("${dsrId}") alternados.
+      - Verifique 'lastDayOff' para manter a paridade correta.
+      - FOLGA EXTRA: Além do DSR dia sim/dia não, insira 1 folga extra ("${folgaId}") a cada quinzena, substituindo um dia de trabalho.
       
       [ESCALA 6x1]
       - Trabalha 6, Folga 1.
-      - Quantidade de Folgas no Mês = Número de Domingos + Número de Feriados no mês.
+      - Quantidade Base: Domingos + Feriados do mês.
       - Use "${folgaId}" para todas as folgas.
-      - Priorize domingos para mulheres.
-      - Respeite o limite de ${rules.maxConsecutiveDays} dias de trabalho seguidos.
+      ${ruleSunday6x1}
+      ${ruleConsecutive}
+      ${ruleExtra}
 
       [ESCALA 5x2]
       - Trabalha 5, Folga 2.
-      - Quantidade de Folgas no Mês = Sábados + Domingos + Feriados.
+      - Quantidade Base: Sábados + Domingos + Feriados.
       - Use "${folgaId}" para todas as folgas.
-      - Normalmente folgam Sáb e Dom, mas se necessário, distribua.
+      ${ruleSunday5x2}
+      ${ruleConsecutive}
+      ${ruleExtra}
 
-      COLABORADORES:
+      COLABORADORES PARA PROCESSAR:
       ${JSON.stringify(batch.map(e => ({ 
           id: e.id, 
           pattern: e.shiftPattern,
@@ -196,7 +225,8 @@ const processBatch = async (
           initialConsecutiveDays: getInitialConsecutiveDays(e.lastDayOff, month, year)
       })))}
 
-      Retorne JSON estrito com array de 'schedules' contendo 'employeeId' e 'days' (array de {date, shiftId}).
+      FORMATO DE SAÍDA:
+      JSON estrito com array 'schedules'. Cada item tem 'employeeId' e 'days' (array de {date: "YYYY-MM-DD", shiftId: "${folgaId}" ou "${dsrId}"}).
     `;
 
     try {
