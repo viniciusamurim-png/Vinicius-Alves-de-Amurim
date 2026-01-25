@@ -98,14 +98,17 @@ export const validateSchedule = (
     const shiftId = assignments[dateKey];
     const shift = shifts.find(s => s.id === shiftId);
     
-    // LOGIC: Empty cell OR non-dayoff shift = Work Day
-    const isDayOff = shift && shift.isDayOff;
+    // LÓGICA ATUALIZADA (2501):
+    // Apenas legendas com categoria EXATA 'dayoff' (Folga/DSR) zeram o contador de dias consecutivos.
+    // Qualquer outra coisa (Trabalho, Vazio, Faltas, Atestados, Férias, Abonos) CONTA como dia corrido
+    // para fins de verificação de limite de dias consecutivos sem folga.
+    const isRealFolga = shift && shift.category === 'dayoff';
 
-    if (isDayOff) {
+    if (isRealFolga) {
       consecutiveWorkDays = 0;
       actualDaysOffCount++;
     } else {
-      // Work day (Explicit shift or Empty cell)
+      // Incrementa para Trabalho, Vazio, ou (Ausência/Licença/Abono)
       consecutiveWorkDays++;
     }
 
@@ -114,7 +117,7 @@ export const validateSchedule = (
       // Do NOT flag subsequent days (8th, 9th) to avoid clutter, as the error is at the 7th day.
       if (consecutiveWorkDays === maxConsecutive + 1) {
           invalidDays.push(day);
-          messages.push(`CLT: Mais de ${maxConsecutive} dias consecutivos (Dia ${day}).`);
+          messages.push(`CLT: Mais de ${maxConsecutive} dias sem Folga válida (Dia ${day}).`);
       }
     }
   }

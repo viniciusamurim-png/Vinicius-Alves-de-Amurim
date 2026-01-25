@@ -311,11 +311,50 @@ const App: React.FC = () => {
   }, [currentUser, isPastMonth]);
 
   const handleMonthChange = (offset: number) => {
-    if (hasUnsavedChanges && !confirm("Mudar de mês descartará as alterações não salvas. Continuar?")) return;
+    if (hasUnsavedChanges && !confirm("Mudar de mês descartará as alterações de ESCALA não salvas. Os cadastros (UF/Turno) serão atualizados automaticamente. Continuar?")) return;
+    
+    // AUTO-UPDATE UF (Last Day Off) when moving to next month
+    if (offset > 0) {
+        const daysInCurrentMonth = getDaysInMonth(schedule.month, schedule.year);
+        let updatedCount = 0;
+
+        const updatedEmployees = employees.map(emp => {
+            let bestDate = emp.lastDayOff;
+            
+            // Look for the last day off in the current grid
+            for (let d = daysInCurrentMonth; d >= 1; d--) {
+                 const dateKey = `${schedule.year}-${String(schedule.month + 1).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
+                 const shiftId = schedule.assignments[emp.id]?.[dateKey];
+                 const shift = shifts.find(s => s.id === shiftId);
+                 if (shift && shift.isDayOff) {
+                     bestDate = dateKey;
+                     break;
+                 }
+            }
+
+            // If found a new date (different from the one currently stored), update it
+            if (bestDate !== emp.lastDayOff) {
+                dirtyEmployeeMetadata.current.add(emp.id);
+                updatedCount++;
+                return { ...emp, lastDayOff: bestDate };
+            }
+            return emp;
+        });
+
+        if (updatedCount > 0) {
+            setEmployees(updatedEmployees);
+        }
+    }
+
     const newDate = new Date(currentDate.getFullYear(), currentDate.getMonth() + offset, 1);
     setCurrentDate(newDate);
     setScheduleState({ month: newDate.getMonth(), year: newDate.getFullYear(), assignments: {}, attachments: {}, comments: {} });
-    setHistoryPast([]); setHistoryFuture([]); setHasUnsavedChanges(false); dirtyRegisters.current.clear();
+    setHistoryPast([]); 
+    setHistoryFuture([]); 
+    
+    // Clear grid changes but keep metadata changes if we just updated UFs
+    dirtyRegisters.current.clear();
+    setHasUnsavedChanges(dirtyEmployeeMetadata.current.size > 0);
   };
 
   const handleSync = async () => {
@@ -466,9 +505,9 @@ const App: React.FC = () => {
         </div>
         {currentView === 'roster' && (
             <div className="bg-[#003399] px-6 py-2 flex items-center gap-4 lg:gap-6 shadow-inner shrink-0 text-white z-40 relative w-full flex-wrap overflow-visible">
-                <MultiSelect label="Unidade" options={activeUnits} selected={selectedUnits} onChange={setSelectedUnits} isAdmin={currentUser.role === 'admin'} onEdit={() => setFilterManager({ isOpen: true, type: 'Unit' })} />
-                <MultiSelect label="Setor" options={activeSectors} selected={selectedSectors} onChange={setSelectedSectors} isAdmin={currentUser.role === 'admin'} onEdit={() => setFilterManager({ isOpen: true, type: 'Sector' })} />
-                <MultiSelect label="Turno" options={activeShiftTypes} selected={selectedShiftTypes} onChange={setSelectedShiftTypes} isAdmin={currentUser.role === 'admin'} onEdit={() => setFilterManager({ isOpen: true, type: 'Shift' })} />
+                <MultiSelect label="Unidade" options={activeUnits} selected={selectedUnits} onChange={setSelectedUnits} isAdmin={currentUser.role === 'admin'} />
+                <MultiSelect label="Setor" options={activeSectors} selected={selectedSectors} onChange={setSelectedSectors} isAdmin={currentUser.role === 'admin'} />
+                <MultiSelect label="Turno" options={activeShiftTypes} selected={selectedShiftTypes} onChange={setSelectedShiftTypes} isAdmin={currentUser.role === 'admin'} />
                 <div className="flex-1 flex justify-end gap-3 items-end h-full pt-1 shrink-0">
                     {hasUnsavedChanges && <span className="text-xs text-yellow-300 font-bold animate-pulse mr-2 mb-2">Alterações não salvas!</span>}
                     <Tooltip content="Salvar Alterações"><button onClick={handleSaveData} disabled={isSaving} className={`p-2 rounded-full transition-all ${hasUnsavedChanges ? 'bg-yellow-600/50 animate-bounce' : 'hover:bg-white/10'}`}><SaveIcon saved={isSaved} saving={isSaving} /></button></Tooltip>

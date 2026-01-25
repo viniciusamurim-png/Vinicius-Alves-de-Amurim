@@ -1,9 +1,8 @@
-
 import React, { useMemo, useState, useEffect, useRef } from 'react';
 import { Employee, Shift, MonthlySchedule, AIRulesConfig, StaffingConfig, GridSelection, ExtendedColumnKey, ScheduleChange } from '../types';
 import { getDaysInMonth, validateSchedule, calculateRequiredDaysOff } from '../services/schedulerService';
 import { Tooltip } from './Tooltip';
-import { HOLIDAYS, COMMENTS_OPTIONS } from '../constants';
+import { HOLIDAYS, COMMENTS_OPTIONS, MONTH_NAMES } from '../constants';
 
 interface Props {
   employees: Employee[];
@@ -198,6 +197,10 @@ export const RosterGrid: React.FC<Props> = ({
 
   // PAGINATION LOGIC
   const paginatedEmployees = useMemo(() => {
+      // IN PRINT MODE: Show ALL employees (disable pagination logic visually, though data might need handling if list is HUGE)
+      // For now, we still use pagination on screen, but print CSS will try to show everything if we restructure.
+      // Actually, standard approach is: On screen (paginated), On print (usually print what's on screen or need a "Print View" mode).
+      // Given the requirement, let's keep screen paginated.
       const startIndex = (currentPage - 1) * ITEMS_PER_PAGE;
       return sortedEmployees.slice(startIndex, startIndex + ITEMS_PER_PAGE);
   }, [sortedEmployees, currentPage]);
@@ -570,7 +573,22 @@ export const RosterGrid: React.FC<Props> = ({
   const labelMap: Record<ExtendedColumnKey, string> = { name: 'NOME COLABORADOR', id: 'ID', role: 'CARGO', cpf: 'CPF', scale: 'ESCALA', time: 'HORÁRIO', shiftType: 'TURNO', position: 'Nº POSIÇÃO', council: 'REG. CONSELHO', bh: 'BH', uf: 'UF' };
 
   return (
-    <div className="roster-bg bg-white rounded shadow-sm border border-slate-300 flex flex-col h-full w-full overflow-hidden select-none relative print:border-none print:shadow-none" onMouseUp={handleMouseUp} onMouseLeave={handleMouseLeaveGrid}>
+    <div className="roster-bg bg-white rounded shadow-sm border border-slate-300 flex flex-col h-full w-full overflow-hidden select-none relative print:border-none print:shadow-none print:block print:overflow-visible" onMouseUp={handleMouseUp} onMouseLeave={handleMouseLeaveGrid}>
+      
+      {/* --- CABEÇALHO DE IMPRESSÃO (Visível apenas ao imprimir) --- */}
+      <div className="hidden print:flex flex-col mb-4 px-2 pt-2 border-b-2 border-slate-800 pb-2">
+           <div className="flex justify-between items-end">
+               <div>
+                   <h1 className="text-2xl font-bold uppercase text-slate-900 tracking-tight">ESCALA MENSAL - PREVENT SENIOR</h1>
+                   <h2 className="text-lg font-bold text-slate-700 uppercase">{MONTH_NAMES[currentSchedule.month]} / {currentSchedule.year}</h2>
+               </div>
+               <div className="text-right">
+                   <p className="text-xs text-slate-500 uppercase">Gerado via EscalaFácil AI</p>
+                   <p className="text-xs text-slate-500">{new Date().toLocaleDateString()} {new Date().toLocaleTimeString()}</p>
+               </div>
+           </div>
+      </div>
+
       {/* Hidden Columns Button - Highest Z-Index in Grid Context */}
       {hiddenColumns.length > 0 && <button onClick={() => setHiddenColumns([])} title="Restaurar Colunas" className="absolute top-1 left-1 z-[90] bg-blue-100 text-blue-700 p-1.5 rounded-full shadow hover:bg-blue-200 print:hidden transition-all w-fit h-fit"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="w-4 h-4"><path d="M10 12.5a2.5 2.5 0 100-5 2.5 2.5 0 000 5z" /><path fillRule="evenodd" d="M.664 10.59a1.651 1.651 0 010-1.186A10.004 10.004 0 0110 3c4.257 0 7.893 2.66 9.336 6.41.147.381.146.804 0 1.186A10.004 10.004 0 0110 17c-4.257 0-7.893-2.66-9.336-6.41zM14 10a4 4 0 11-8 0 4 4 0 018 0z" clipRule="evenodd" /></svg></button>}
 
@@ -601,25 +619,25 @@ export const RosterGrid: React.FC<Props> = ({
       {/* UNIFIED SCROLLABLE AREA */}
       <div 
         ref={gridContainerRef}
-        className="flex-1 overflow-auto w-full relative"
+        className="flex-1 overflow-auto w-full relative print:overflow-visible print:h-auto"
         onScroll={handleGridScroll}
       >
         {/* HEADER - STICKY TOP */}
-        <div className="sticky top-0 z-[60] bg-company-blue text-white shadow-md w-fit flex min-w-max">
-            <div className="flex-shrink-0 flex border-r border-blue-800 bg-company-blue z-50">
+        <div className="sticky top-0 z-[60] bg-company-blue text-white shadow-md w-fit flex min-w-max print:bg-white print:text-black print:border-b-2 print:border-black print:static print:shadow-none">
+            <div className="flex-shrink-0 flex border-r border-blue-800 bg-company-blue z-50 print:bg-white print:border-black">
                 {visibleColumns.map((key) => {
                     const isFrozen = frozenColumns.includes(key); const left = getStickyLeft(key);
                     return (
-                    <div key={key} style={{ width: colWidths[key], position: isFrozen ? 'sticky' : 'relative', left: isFrozen ? left : 'auto', zIndex: isFrozen ? 60 : 'auto' }} onClick={() => setSortConfig(prev => ({ key, direction: prev.key === key && prev.direction === 'asc' ? 'desc' : 'asc' }))} onContextMenu={(e) => handleHeaderContextMenu(e, key)} className={`relative p-2 font-bold text-[10px] border-r border-blue-800 flex items-center justify-center overflow-hidden whitespace-nowrap cursor-pointer hover:bg-blue-900 group ${isFrozen ? 'bg-company-blue shadow-[2px_0_5px_rgba(0,0,0,0.2)]' : ''}`}>
+                    <div key={key} style={{ width: colWidths[key], position: isFrozen ? 'sticky' : 'relative', left: isFrozen ? left : 'auto', zIndex: isFrozen ? 60 : 'auto' }} onClick={() => setSortConfig(prev => ({ key, direction: prev.key === key && prev.direction === 'asc' ? 'desc' : 'asc' }))} onContextMenu={(e) => handleHeaderContextMenu(e, key)} className={`relative p-2 font-bold text-[10px] border-r border-blue-800 flex items-center justify-center overflow-hidden whitespace-nowrap cursor-pointer hover:bg-blue-900 group ${isFrozen ? 'bg-company-blue shadow-[2px_0_5px_rgba(0,0,0,0.2)]' : ''} print:bg-white print:text-black print:border-black print:shadow-none`}>
                         {labelMap[key]} {sortConfig.key === key && <span className="ml-1 text-[8px]">{sortConfig.direction === 'asc' ? '▲' : '▼'}</span>}
-                        <div className="absolute right-0 top-0 bottom-0 w-1 cursor-col-resize hover:bg-blue-400 z-50 group-hover:bg-blue-600/50" onMouseDown={(e) => handleResizeStart(e, key)} onClick={(e) => e.stopPropagation()}/>
+                        <div className="absolute right-0 top-0 bottom-0 w-1 cursor-col-resize hover:bg-blue-400 z-50 group-hover:bg-blue-600/50 print:hidden" onMouseDown={(e) => handleResizeStart(e, key)} onClick={(e) => e.stopPropagation()}/>
                     </div>
                 )})}
             </div>
             <div className="flex min-w-max">
-                {daysArray.map(day => (<div key={day} className={`w-8 flex flex-col items-center justify-center border-r border-blue-800 ${isWeekendOrHoliday(day) ? 'bg-sky-500/30' : ''}`} title={getHolidayName(day)}><span className="text-[9px] font-medium opacity-80 uppercase">{getDayLabel(day).substring(0, 1)}</span><span className="text-[10px] font-bold">{String(day).padStart(2, '0')}</span></div>))}
-                 <div className="w-16 flex-shrink-0 p-2 font-bold text-[10px] border-r border-blue-800 flex items-center justify-center bg-company-blue">FOLGAS</div>
-                 <div className="w-10 flex-shrink-0 p-2 font-bold text-[10px] border-r border-blue-800 flex items-center justify-center bg-company-blue">ST</div>
+                {daysArray.map(day => (<div key={day} className={`w-8 flex flex-col items-center justify-center border-r border-blue-800 print:border-black print:border-r ${isWeekendOrHoliday(day) ? 'bg-sky-500/30 print:bg-gray-200' : ''}`} title={getHolidayName(day)}><span className="text-[9px] font-medium opacity-80 uppercase">{getDayLabel(day).substring(0, 1)}</span><span className="text-[10px] font-bold">{String(day).padStart(2, '0')}</span></div>))}
+                 <div className="w-16 flex-shrink-0 p-2 font-bold text-[10px] border-r border-blue-800 flex items-center justify-center bg-company-blue print:bg-white print:text-black print:border-black">FOLGAS</div>
+                 <div className="w-10 flex-shrink-0 p-2 font-bold text-[10px] border-r border-blue-800 flex items-center justify-center bg-company-blue print:bg-white print:text-black print:border-black">ST</div>
             </div>
         </div>
 
@@ -633,9 +651,9 @@ export const RosterGrid: React.FC<Props> = ({
             const isExcessDaysOff = daysOffCount > targetDaysOff;
 
             return (
-                <div key={employee.id} className="flex border-b border-slate-300 bg-white hover:bg-blue-50 transition-colors group h-9">
+                <div key={employee.id} className="flex border-b border-slate-300 bg-white hover:bg-blue-50 transition-colors group h-9 print:border-black print:h-auto">
                     {/* Left Cols */}
-                    <div draggable={!isReadOnly} onDragStart={(e) => handleDragStart(e, employee.id)} onDrop={(e) => handleDrop(e, employee.id)} onDragOver={(e) => e.preventDefault()} className="flex-shrink-0 flex border-r border-slate-300 bg-white z-10 group-hover:bg-blue-50 cursor-move">
+                    <div draggable={!isReadOnly} onDragStart={(e) => handleDragStart(e, employee.id)} onDrop={(e) => handleDrop(e, employee.id)} onDragOver={(e) => e.preventDefault()} className="flex-shrink-0 flex border-r border-slate-300 bg-white z-10 group-hover:bg-blue-50 cursor-move print:border-black">
                         {visibleColumns.map(key => {
                             let val = key === 'scale' ? employee.shiftPattern : key === 'time' ? employee.workTime : key === 'position' ? employee.positionNumber : key === 'council' ? employee.categoryCode : key === 'bh' ? employee.bankHoursBalance : key === 'uf' ? employee.lastDayOff : (employee as any)[key];
                             
@@ -650,7 +668,7 @@ export const RosterGrid: React.FC<Props> = ({
                             const canEditCell = !isReadOnly && (key === 'shiftType' || key === 'uf');
 
                             return (
-                                <div key={key} style={{ width: colWidths[key], position: isFrozen ? 'sticky' : 'relative', left: isFrozen ? left : 'auto', zIndex: isFrozen ? 50 : 'auto' }} className={`flex items-center px-2 border-r border-slate-100 overflow-hidden bg-white group-hover:bg-blue-50 ${isFrozen ? 'shadow-[2px_0_5px_rgba(0,0,0,0.05)]' : ''}`}>
+                                <div key={key} style={{ width: colWidths[key], position: isFrozen ? 'sticky' : 'relative', left: isFrozen ? left : 'auto', zIndex: isFrozen ? 50 : 'auto' }} className={`flex items-center px-2 border-r border-slate-100 overflow-hidden bg-white group-hover:bg-blue-50 ${isFrozen ? 'shadow-[2px_0_5px_rgba(0,0,0,0.05)]' : ''} print:border-black print:shadow-none`}>
                                     {canEditCell ? (
                                         key === 'uf' ? (
                                             <div className="relative w-full h-full flex items-center justify-between px-1 group/uf">
@@ -663,7 +681,7 @@ export const RosterGrid: React.FC<Props> = ({
                                                     onBlur={(e) => { if (onUpdateEmployee) onUpdateEmployee(employee.id, 'lastDayOff', normalizeDateInput(e.target.value)); }}
                                                     onKeyDown={(e) => { e.stopPropagation(); if (e.key === 'Enter') e.currentTarget.blur(); }}
                                                 />
-                                                <div className="relative w-5 h-full flex items-center justify-center cursor-pointer text-slate-400 hover:text-blue-500 pr-1">
+                                                <div className="relative w-5 h-full flex items-center justify-center cursor-pointer text-slate-400 hover:text-blue-500 pr-1 print:hidden">
                                                      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="w-3 h-3 pointer-events-none">
                                                         <path fillRule="evenodd" d="M5.75 2a.75.75 0 01.75.75V4h7V2.75a.75.75 0 011.5 0V4h.25A2.75 2.75 0 0118 6.75v8.5A2.75 2.75 0 0115.25 18H4.75A2.75 2.75 0 012 15.25v-8.5A2.75 2.75 0 014.75 4H5V2.75A.75.75 0 015.75 2zm-1 5.5c-.69 0-1.25.56-1.25 1.25v6.5c0 .69.56 1.25 1.25 1.25h10.5c.69 0 1.25-.56 1.25-1.25v-6.5c0-.69-.56-1.25-1.25-1.25H4.75z" clipRule="evenodd" />
                                                      </svg>
@@ -678,7 +696,7 @@ export const RosterGrid: React.FC<Props> = ({
                                         ) : (
                                             <input type="text" className="w-full bg-transparent border-none text-[10px] uppercase font-medium focus:ring-1 focus:ring-blue-500 rounded px-1 min-w-0 h-full" value={val || ''} onChange={(e) => { if (onUpdateEmployee) onUpdateEmployee(employee.id, 'shiftType', e.target.value); }} onKeyDown={(e) => { e.stopPropagation(); if (e.key === 'Enter') e.currentTarget.blur(); }} />
                                         )
-                                    ) : (<span className={`text-[9px] truncate uppercase font-medium ${colorClass}`} title={val}>{displayVal}</span>)}
+                                    ) : (<span className={`text-[9px] truncate uppercase font-medium ${colorClass} print:text-black`} title={val}>{displayVal}</span>)}
                                 </div>
                             )
                         })}
@@ -694,27 +712,30 @@ export const RosterGrid: React.FC<Props> = ({
                             const comment = currentSchedule.comments?.[employee.id]?.[dateKey];
                             const isViolation = validation.invalidDays.includes(day);
 
+                            // Background Priority: Shift Color > Weekend/Holiday Column Color > Transparent
+                            // Using bg-sky-500/10 for weekend columns to match header style but lighter.
+                            const cellBackground = shift ? shift.color : (isOff ? 'bg-sky-500/10 print:bg-gray-200' : 'bg-transparent');
+
                             return (
                                 <div key={day} onMouseDown={(e) => handleMouseDown(e, rowIndex, day)} onMouseEnter={() => handleMouseEnter(rowIndex, day)} onContextMenu={(e) => handleCellContextMenu(e, employee.id, day)} 
                                 className={`w-8 h-full flex items-center justify-center text-[10px] font-bold select-none relative 
-                                    ${isViolation ? 'border border-red-400 z-10' : 'border-r border-slate-300'}
-                                    ${!shift && isOff ? 'bg-sky-50' : ''} 
-                                    ${shift ? shift.color : 'bg-transparent'} 
+                                    ${isViolation ? 'border border-red-400 z-10 print:border-black' : 'border-r border-slate-300 print:border-black'}
+                                    ${cellBackground}
                                     ${shift?.textColor ? shift.textColor : 'text-slate-700'} 
-                                    ${selected ? 'ring-2 ring-inset ring-blue-600 bg-blue-100/50' : ''} 
+                                    ${selected ? 'ring-2 ring-inset ring-blue-600 bg-blue-100/50 print:ring-0' : ''} 
                                     ${isReadOnly ? 'cursor-default' : 'cursor-pointer'}`}>
                                     {shift ? shift.code : ''}
-                                    {comment && <Tooltip content={`Obs: ${comment}`}><span className="absolute bottom-0 right-0 w-0 h-0 border-l-[6px] border-l-transparent border-b-[6px] border-b-orange-500"></span></Tooltip>}
+                                    {comment && <Tooltip content={`Obs: ${comment}`}><span className="absolute bottom-0 right-0 w-0 h-0 border-l-[6px] border-l-transparent border-b-[6px] border-b-orange-500 print:hidden"></span></Tooltip>}
                                 </div>
                             );
                         })}
-                         <div className={`w-16 flex-shrink-0 border-r border-slate-300 flex items-center justify-center text-[10px] bg-slate-50 font-bold ${isExcessDaysOff ? 'text-red-600' : 'text-slate-700'}`}>{String(daysOffCount).padStart(2, '0')}/{String(targetDaysOff).padStart(2, '0')}</div>
-                         <div className="w-10 flex-shrink-0 border-r border-slate-300 flex items-center justify-center bg-slate-50 relative group/st">
-                             {validation.valid ? <span className="text-green-500 font-bold">✔</span> : (
+                         <div className={`w-16 flex-shrink-0 border-r border-slate-300 flex items-center justify-center text-[10px] bg-slate-50 font-bold ${isExcessDaysOff ? 'text-red-600' : 'text-slate-700'} print:border-black print:text-black print:bg-white`}>{String(daysOffCount).padStart(2, '0')}/{String(targetDaysOff).padStart(2, '0')}</div>
+                         <div className="w-10 flex-shrink-0 border-r border-slate-300 flex items-center justify-center bg-slate-50 relative group/st print:border-black print:bg-white">
+                             {validation.valid ? <span className="text-green-500 font-bold print:hidden">✔</span> : (
                                 <div className="relative flex justify-center w-full h-full items-center">
-                                    <span className="text-red-500 font-bold cursor-help text-xs">⚠</span>
+                                    <span className="text-red-500 font-bold cursor-help text-xs print:hidden">⚠</span>
                                     {/* Tooltip fixed to left to avoid overflow off screen */}
-                                    <div className="absolute top-full right-0 mt-1 hidden group-hover/st:block z-[9999] w-72 bg-gray-900 text-white text-[10px] p-2 rounded shadow-xl whitespace-pre-line text-left border border-gray-700">
+                                    <div className="absolute top-full right-0 mt-1 hidden group-hover/st:block z-[9999] w-72 bg-gray-900 text-white text-[10px] p-2 rounded shadow-xl whitespace-pre-line text-left border border-gray-700 print:hidden">
                                         {validation.messages.join('\n')}
                                     </div>
                                 </div>
@@ -724,9 +745,36 @@ export const RosterGrid: React.FC<Props> = ({
                 </div>
             )})}
         </div>
+        
+        {/* --- RODAPÉ DE IMPRESSÃO (Legendas e Assinaturas) --- */}
+        <div className="hidden print:block mt-8 break-inside-avoid px-2">
+            <h3 className="font-bold text-sm uppercase mb-2 border-b border-black pb-1">Legendas</h3>
+            <div className="flex flex-wrap gap-4 mb-8">
+               {shifts.map(s => (
+                   <div key={s.id} className="flex items-center gap-2">
+                       <div className={`w-5 h-5 border border-black flex items-center justify-center text-[10px] font-bold ${s.color} ${s.textColor || 'text-black'}`}>{s.code}</div>
+                       <span className="text-[10px] uppercase font-bold">{s.name}</span>
+                   </div>
+               ))}
+            </div>
+
+            <div className="flex justify-between mt-16">
+               <div className="w-1/3 text-center">
+                   <div className="border-t border-black pt-1">
+                       <p className="font-bold text-xs uppercase">Assinatura do Responsável</p>
+                   </div>
+               </div>
+               <div className="w-1/3 text-center">
+                   <div className="border-t border-black pt-1">
+                       <p className="font-bold text-xs uppercase">Assinatura da Gestão</p>
+                   </div>
+               </div>
+            </div>
+        </div>
+
       </div>
       
-      {/* FOOTER - STATS & PAGINATION */}
+      {/* FOOTER - STATS & PAGINATION (Escondido na impressão padrão) */}
       <div className="bg-slate-50 border-t border-slate-300 shadow-inner flex flex-col shrink-0 print:hidden z-50">
           <div className="flex h-10 border-b border-slate-200 w-full overflow-hidden" ref={footerScrollRef}>
              {/* Sticky label in Footer (Synced to grid's frozen columns width) */}

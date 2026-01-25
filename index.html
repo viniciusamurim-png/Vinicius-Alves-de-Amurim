@@ -1,4 +1,3 @@
-
 <!DOCTYPE html>
 <html lang="pt-BR">
   <head>
@@ -62,30 +61,51 @@
             margin: 5mm;
         }
         body {
-            background-color: white;
+            background-color: white !important;
+            -webkit-print-color-adjust: exact !important;
+            print-color-adjust: exact !important;
             width: 100%;
             height: 100%;
             overflow: visible !important;
-            zoom: 0.8; /* Scale down slightly to fit more columns */
+            zoom: 0.75; /* Scale down to fit more columns */
         }
         #root {
             width: 100%;
         }
-        /* Ensure background colors print */
+        
+        /* Force background colors */
         * {
             -webkit-print-color-adjust: exact !important;
             print-color-adjust: exact !important;
+            color-adjust: exact !important;
         }
         
         /* Hide UI elements */
-        button, input[type="file"], .print\:hidden {
+        button, input[type="file"], .print\:hidden, nav, header {
             display: none !important;
         }
         
+        /* Ensure specific print elements are shown */
+        .print\:block {
+            display: block !important;
+        }
+        .print\:flex {
+            display: flex !important;
+        }
+        
         /* Expand containers */
-        .overflow-auto, .overflow-hidden {
+        .overflow-auto, .overflow-hidden, .roster-bg {
             overflow: visible !important;
             height: auto !important;
+            max-height: none !important;
+            width: 100% !important;
+            border: none !important;
+            box-shadow: none !important;
+        }
+
+        /* Prevent page breaks inside rows */
+        tr, .group {
+            break-inside: avoid;
         }
       }
     </style>
