@@ -96,13 +96,13 @@
         /* Specific fix for the grid container width */
         .roster-scroll-container {
              width: max-content !important;
-             min-width: 100% !important;
+             /* Removed min-width: 100% to avoid extra empty space on right */
         }
 
         /* Ensure rows maintain structure */
         .print-row {
             width: max-content !important;
-            min-width: 100% !important;
+            /* Removed min-width: 100% to avoid extra empty space on right */
             height: 34px !important; /* Enforce height */
             display: flex !important;
             break-inside: avoid;
